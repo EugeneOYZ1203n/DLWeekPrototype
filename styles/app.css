@@ -1,21 +1,57 @@
 :root {
-  --bg-start: #eef4ff;
-  --bg-mid: #f6f8fb;
-  --bg-end: #f4f7fa;
-  --panel: #ffffff;
-  --text: #1f2937;
-  --subtext: #6b7280;
-  --border: #e5e7eb;
-  --brand: #10a37f;
-  --brand-soft: #e8f8f3;
-  --result-bg: #ffffff;
-  --timer-bg: #111827;
-  --timer-text: #f9fafb;
-  --sidebar-bg: #0f172a;
-  --sidebar-text: #e5e7eb;
-  --button-bg: #10a37f;
-  --button-border: #0f8f70;
-  --button-hover: #0f8f70;
+  --day-bg-start: #eef4ff;
+  --day-bg-mid: #f6f8fb;
+  --day-bg-end: #f4f7fa;
+  --day-panel: #ffffff;
+  --day-text: #1f2937;
+  --day-subtext: #6b7280;
+  --day-border: #e5e7eb;
+  --day-brand: #10a37f;
+  --day-brand-soft: #e8f8f3;
+  --day-result-bg: #ffffff;
+  --day-timer-bg: #111827;
+  --day-timer-text: #f9fafb;
+  --day-sidebar-bg: #0f172a;
+  --day-sidebar-text: #e5e7eb;
+  --day-button-bg: #10a37f;
+  --day-button-border: #0f8f70;
+  --day-button-hover: #0f8f70;
+
+  --night-bg-start: #0b1020;
+  --night-bg-mid: #0f172a;
+  --night-bg-end: #111827;
+  --night-panel: #111827;
+  --night-text: #f3f4f6;
+  --night-subtext: #9ca3af;
+  --night-border: #374151;
+  --night-brand: #34d399;
+  --night-brand-soft: #102a27;
+  --night-result-bg: #111827;
+  --night-timer-bg: #1f2937;
+  --night-timer-text: #f9fafb;
+  --night-sidebar-bg: #030712;
+  --night-sidebar-text: #e5e7eb;
+  --night-button-bg: #34d399;
+  --night-button-border: #2bbd87;
+  --night-button-hover: #2bbd87;
+
+  --bg-start: var(--day-bg-start);
+  --bg-mid: var(--day-bg-mid);
+  --bg-end: var(--day-bg-end);
+  --panel: var(--day-panel);
+  --text: var(--day-text);
+  --subtext: var(--day-subtext);
+  --border: var(--day-border);
+  --brand: var(--day-brand);
+  --brand-soft: var(--day-brand-soft);
+  --result-bg: var(--day-result-bg);
+  --timer-bg: var(--day-timer-bg);
+  --timer-text: var(--day-timer-text);
+  --sidebar-bg: var(--day-sidebar-bg);
+  --sidebar-text: var(--day-sidebar-text);
+  --button-bg: var(--day-button-bg);
+  --button-border: var(--day-button-border);
+  --button-hover: var(--day-button-hover);
 }
 
 .stApp {
@@ -24,7 +60,7 @@
 
 .block-container {
   max-width: 1120px;
-  padding-top: 1.2rem;
+  padding-top: 4rem;
 }
 
 .title {
@@ -99,4 +135,48 @@
   background: var(--button-hover);
   border-color: var(--button-hover);
   color: #fff;
+}
+
+[data-testid="stWidgetLabel"] p {
+  color: var(--text);
+}
+
+[data-testid="stWidgetLabel"] label,
+[data-testid="stWidgetLabel"] span,
+[data-testid="stWidgetLabel"] div {
+  color: var(--text) !important;
+}
+
+[data-testid="stMarkdownContainer"] h3 {
+  color: var(--text);
+}
+
+[data-baseweb="select"] > div {
+  background: var(--panel);
+  border-color: var(--border);
+}
+
+[data-baseweb="select"] * {
+  color: var(--text);
+}
+
+[data-testid="stTextArea"] textarea {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+[data-testid="stTextArea"] label {
+  color: var(--text) !important;
+}
+
+[data-testid="stTextArea"] textarea::placeholder {
+  color: var(--subtext);
+  opacity: 0.85;
+}
+
+[data-testid="stTextArea"] textarea:disabled {
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+  opacity: 1;
 }
