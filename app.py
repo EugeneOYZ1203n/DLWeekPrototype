@@ -10,6 +10,7 @@ import soundfile as sf
 import streamlit as st
 
 from question import get_question
+from score import evaluate_pronunciation
 from transcribe import transcribe_audio
 
 SAMPLE_RATE = 16000
@@ -67,6 +68,22 @@ def record_audio(timer_placeholder):
 def load_css():
     if CSS_FILE.exists():
         st.markdown(f"<style>{CSS_FILE.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
+
+
+def build_pause_spans(segments):
+    pauses = []
+    if not segments:
+        return pauses
+    for idx in range(1, len(segments)):
+        prev_seg = segments[idx - 1]
+        curr_seg = segments[idx]
+        gap = float(curr_seg["start"]) - float(prev_seg["end"])
+        if gap > 0.15:
+            pauses.append({
+                "start": round(float(prev_seg["end"]), 3),
+                "end": round(float(curr_seg["start"]), 3),
+            })
+    return pauses
 
 
 def apply_theme():
@@ -138,6 +155,12 @@ apply_theme()
 with st.sidebar:
     st.header("Session")
     st.caption("Speaking practice controls")
+    selected_language = st.selectbox(
+        "Response language",
+        options=["ja", "en", "ms", "ta", "zh", "es", "fr", "de"],
+        index=0,
+        help="Language code used for transcription + scoring.",
+    )
     st.button("New Sentence", use_container_width=True, on_click=new_prompt)
     theme_label = (
         "Switch to Night Mode"
@@ -179,7 +202,21 @@ if st.button("Record", use_container_width=True):
         audio_bytes = audio_file.read()
 
     with st.spinner("Transcribing..."):
-        result = transcribe_audio(temp_path)
+        result = transcribe_audio(temp_path, language=selected_language)
+
+    pauses = build_pause_spans(result["segments"])
+    scoring_payload = {
+        "transcript": result["transcript"],
+        "pauses": pauses,
+        "total_duration": float(elapsed_time),
+        "language": selected_language,
+    }
+    with st.spinner("Scoring response..."):
+        score_report = evaluate_pronunciation(
+            scoring_payload,
+            prompt=st.session_state.question,
+            language=selected_language,
+        )
 
     segment_confidences = [np.exp(seg["avg_logprob"]) for seg in result["segments"]]
     avg_confidence = float(np.mean(segment_confidences)) if segment_confidences else 0.0
@@ -204,6 +241,7 @@ if st.button("Record", use_container_width=True):
             "avg_confidence": avg_confidence,
             "elapsed_time": elapsed_time,
             "segments_df": segment_data,
+            "score_report": score_report,
         },
     )
 
@@ -231,6 +269,60 @@ for idx, item in enumerate(st.session_state.history, start=1):
             unsafe_allow_html=True,
         )
         st.write(f'{item["avg_confidence"]:.2f}')
+
+    score = item.get("score_report", {})
+    if score:
+        st.markdown('<div class="result-card"><b>Scoring Dashboard</b></div>', unsafe_allow_html=True)
+        s1, s2, s3 = st.columns(3)
+        with s1:
+            st.metric("Overall Score", f'{score.get("overall_score", 0):.1f}/100')
+        with s2:
+            llm_state = score.get("llm_grading", {}).get("success", False)
+            st.metric("LLM Grader", "Online" if llm_state else "Offline")
+        with s3:
+            st.metric("Language", score.get("language", "n/a"))
+
+        llm_meta = score.get("llm_grading", {})
+        if llm_meta:
+            st.caption(
+                f"Model: {llm_meta.get('model', 'n/a')} | Endpoint: {llm_meta.get('endpoint', 'n/a')} | "
+                f"Timeout: {llm_meta.get('timeout_seconds', 'n/a')}s"
+            )
+            if not llm_meta.get("success", False):
+                st.error(f"LLM error: {llm_meta.get('error', 'Unknown error')}")
+
+        subscores = score.get("subscores", {})
+        if subscores:
+            sub_df = pd.DataFrame(
+                [{"Category": k, "Score": v} for k, v in subscores.items()]
+            ).sort_values("Score", ascending=False)
+            st.bar_chart(sub_df.set_index("Category"))
+
+        feedback_summary = score.get("feedback_summary") or []
+        if feedback_summary:
+            st.markdown("**Feedback Summary**")
+            for line in feedback_summary:
+                st.write(f"- {line}")
+
+        issues = score.get("issues") or []
+        if issues:
+            st.markdown("**Top Improvement Areas**")
+            for issue in issues[:3]:
+                evidence = issue.get("evidence", {})
+                hint = issue.get("suggestion_hint", "")
+                st.write(
+                    f"- [{issue.get('category', 'general')}] {issue.get('message', '')} "
+                    f"(severity {issue.get('severity', 0):.2f})"
+                )
+                if evidence:
+                    st.caption(f"Evidence: {evidence}")
+                if hint:
+                    st.caption(f"Suggestion: {hint}")
+
+        suggestion_input = score.get("suggestion_generator_input", {})
+        if suggestion_input:
+            with st.expander("Suggestion Generator Input (JSON)"):
+                st.json(suggestion_input)
 
     st.markdown('<div class="result-card"><b>Full Transcription</b></div>', unsafe_allow_html=True)
     st.write(item["transcript"] or "_No speech detected._")

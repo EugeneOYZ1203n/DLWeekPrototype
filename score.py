@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import urllib.error
 import urllib.request
 from typing import Any, Dict, Iterable, List, Tuple
@@ -180,7 +181,12 @@ def _build_llm_prompt(
 
 def _call_ollama_json(prompt_text: str) -> Dict[str, Any]:
     model = os.getenv("SCORING_MODEL", "gemma3:4b")
-    endpoint = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434/api/generate")
+    endpoint = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434/api/generate").strip()
+    if endpoint.endswith("/"):
+        endpoint = endpoint[:-1]
+    if "/api/" not in endpoint:
+        endpoint = endpoint + "/api/generate"
+    timeout_seconds = float(os.getenv("SCORING_TIMEOUT_SECONDS", "90"))
 
     body = {
         "model": model,
@@ -199,8 +205,11 @@ def _call_ollama_json(prompt_text: str) -> Dict[str, Any]:
         method="POST",
     )
 
-    with urllib.request.urlopen(req, timeout=20) as response:
+    with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
         payload = json.loads(response.read().decode("utf-8"))
+        api_error = payload.get("error")
+        if api_error:
+            raise ValueError(f"Ollama API error: {api_error}")
         text = str(payload.get("response", "")).strip()
         if not text:
             raise ValueError("LLM response was empty")
@@ -342,11 +351,25 @@ def evaluate_pronunciation(
     )
 
     llm_error = None
+    model_name = os.getenv("SCORING_MODEL", "gemma3:4b")
+    endpoint_env = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434/api/generate").strip()
+    endpoint_for_meta = endpoint_env.rstrip("/")
+    if "/api/" not in endpoint_for_meta:
+        endpoint_for_meta = endpoint_for_meta + "/api/generate"
+    timeout_for_meta = float(os.getenv("SCORING_TIMEOUT_SECONDS", "90"))
+
     try:
         llm_raw = _call_ollama_json(llm_prompt)
         normalized = _normalize_llm_output(llm_raw, weights)
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
-        llm_error = str(exc)
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, socket.timeout, ValueError, json.JSONDecodeError) as exc:
+        if isinstance(exc, urllib.error.HTTPError):
+            try:
+                err_body = exc.read().decode("utf-8")
+                llm_error = f"HTTP {exc.code}: {err_body}"
+            except Exception:
+                llm_error = f"HTTP {exc.code}: {exc.reason}"
+        else:
+            llm_error = str(exc)
         normalized = {
             "overall_score": 0.0,
             "subscores": {
@@ -391,7 +414,9 @@ def evaluate_pronunciation(
         "strengths": normalized["strengths"],
         "llm_grading": {
             "provider": "ollama",
-            "model": os.getenv("SCORING_MODEL", "gemma3:4b"),
+            "model": model_name,
+            "endpoint": endpoint_for_meta,
+            "timeout_seconds": timeout_for_meta,
             "success": llm_error is None,
             "error": llm_error,
         },
