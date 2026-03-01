@@ -3,23 +3,22 @@ from __future__ import annotations
 import json
 import re
 from typing import Any, Dict, List
-from urllib import request
+
+import ollama
 
 
 class SuggestionGenerator:
     """
     Generates speaking improvement suggestions from transcript, score metrics,
-    and speech nuances (pauses, hesitation, tone) using an Ollama model.
+    and speech nuances (pauses, hesitation, tone) using a local Ollama model.
     """
 
     def __init__(
         self,
-        model: str = "llama3.1:8b-instruct",
-        ollama_url: str = "http://localhost:11434/api/generate",
+        model: str = "gemma2:2b",
         timeout_seconds: int = 60,
     ) -> None:
         self.model = model
-        self.ollama_url = ollama_url
         self.timeout_seconds = timeout_seconds
 
     def generate(
@@ -88,25 +87,14 @@ Return only valid JSON with this schema:
 """.strip()
 
     def _call_ollama(self, prompt: str) -> str:
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",
-        }
-        body = json.dumps(payload).encode("utf-8")
-        req = request.Request(
-            self.ollama_url,
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        response = ollama.chat(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            format="json",
+            options={"temperature": 0.2},
         )
-
-        with request.urlopen(req, timeout=self.timeout_seconds) as resp:
-            response_text = resp.read().decode("utf-8")
-
-        data = json.loads(response_text)
-        return data.get("response", "")
+        message = response.get("message", {})
+        return message.get("content", "")
 
     def _parse_json(self, text: str) -> Dict[str, Any]:
         if not text:
@@ -198,4 +186,3 @@ Return only valid JSON with this schema:
             "suggestions": suggestions,
             "next_practice_focus": [s["category"] for s in suggestions[:3]],
         }
-
