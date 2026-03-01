@@ -1,63 +1,60 @@
-# score.py
-# Handles holistic scoring of user pronunciation using metrics and LLM
+from __future__ import annotations
 
-from typing import Dict, List
-import json
+from typing import Any, Dict
 
-# Use Ollama here
+from suggestion import SuggestionGenerator
 
-def evaluate_pronunciation_llm(transcribe_output) -> Dict:
+
+def evaluate_pronunciation_llm(transcribe_output: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Main scoring function:
-    1. Compute metrics
-    2. Collate all info into a prompt for an LLM
-    3. Get JSON output with overall score and detailed feedback
-    
-    Returns:
-        score_report: dict containing overall score, metrics, and feedback
+    Placeholder scoring step that normalizes values from the transcription step.
+    Replace this with your full scoring logic/LLM scorer when ready.
     """
-    metrics = {}
+    transcript = transcribe_output.get("transcript", "")
+    pause_count = int(transcribe_output.get("pause_count", 0) or 0)
+    hesitation_count = int(transcribe_output.get("hesitation_count", 0) or 0)
 
-    # Step 2: define default prompt for the LLM
-    default_prompt = f"""
-You are a Japanese language tutor. A student has spoken a sentence. 
-Here is the transcribed speech from the student: "{transcript}"
-Preliminary metrics: {metrics}
+    fluency_penalty = min(pause_count * 3 + hesitation_count * 4, 60)
+    fluency_score = max(40, 100 - fluency_penalty)
 
-Assess the student's response in terms of:
-- Relevance to the question/sentence
-- Vocabulary used correctly
-- Sentence structure / grammar
-- Pronunciation (based on transcribed text and gaps)
-- Fluency and pauses (number and length of silent gaps)
-
-Return a JSON object with the following keys:
-- overall_score (0-100)
-- relevance_score
-- vocabulary_score
-- grammar_score
-- pronunciation_score
-- fluency_score
-- feedback (text giving actionable advice)
-"""
-    
-    # Step 3: Call your LLM here (pseudo code)
-    # Example using OpenAI API
-    # response = client.chat.completions.create(
-    #     model="gpt-4",
-    #     messages=[{"role": "system", "content": default_prompt}]
-    # )
-    # score_report = json.loads(response.choices[0].message.content)
-    
-    # For skeleton, return placeholder
     score_report = {
-        "overall_score": 0,
-        "relevance_score": 0,
-        "vocabulary_score": 0,
-        "grammar_score": 0,
-        "pronunciation_score": 0,
-        "fluency_score": 0,
-        "feedback": "This is placeholder feedback. Replace with LLM output."
+        "overall_score": fluency_score,
+        "relevance_score": 70,
+        "vocabulary_score": 70,
+        "grammar_score": 70,
+        "pronunciation_score": 70,
+        "fluency_score": fluency_score,
+        "feedback": f'Transcript captured: "{transcript}"',
     }
-    
     return score_report
+
+
+def evaluate_pronunciation(transcribe_output: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Main entry point used by the app:
+    1) Build score report from prior step
+    2) Generate speaking suggestions with Ollama using transcript + nuance metrics
+    """
+    score_report = evaluate_pronunciation_llm(transcribe_output)
+
+    speech_metrics = {
+        "pause_count": transcribe_output.get("pause_count", 0),
+        "avg_pause_ms": transcribe_output.get("avg_pause_ms", 0),
+        "hesitation_count": transcribe_output.get("hesitation_count", 0),
+        "tone_consistency": transcribe_output.get("tone_consistency", 1.0),
+        "clip_duration_sec": transcribe_output.get("duration_sec", 0),
+    }
+
+    generator = SuggestionGenerator()
+    suggestions = generator.generate(
+        transcript=transcribe_output.get("transcript", ""),
+        score_report=score_report,
+        speech_metrics=speech_metrics,
+        target_sentence=transcribe_output.get("target_sentence", ""),
+        language=transcribe_output.get("language_name", "Japanese"),
+    )
+
+    return {
+        "score_report": score_report,
+        "speaking_suggestions": suggestions,
+    }
