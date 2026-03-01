@@ -25,7 +25,8 @@ custom_prompt = None
 if selected_prompt_key == "custom":
     custom_prompt = st.text_area(
         "Custom prompt",
-        value="Create one short Japanese speaking practice sentence. Return only Japanese text.",
+        value="",
+        placeholder="Provide some topics to generate a prompt!",
     )
 
 if "practice_question" not in st.session_state:
@@ -39,7 +40,7 @@ if st.button("Generate Question"):
 
 question = st.session_state.practice_question
 st.subheader("Practice Sentence:")
-st.write(question)
+st.text_area("Generated/Selected Question", value=question, height=100, disabled=True)
 
 # Placeholders
 timer_placeholder = st.empty()
