@@ -19,10 +19,37 @@ SILENCE_THRESHOLD = 0.01
 SILENCE_LIMIT = 4
 CSS_FILE = Path(__file__).parent / "styles" / "app.css"
 
+st.set_page_config(page_title="Japanese Speaking Practice", page_icon="JP", layout="wide")
+
+
+# Practice question controls
+prompt_options = list(SAMPLE_PROMPTS.keys()) + ["custom"]
+style_col, _ = st.columns([1, 3])
+with style_col:
+    selected_prompt_key = st.selectbox("Prompt style", prompt_options, index=0)
+
+custom_prompt = None
+if selected_prompt_key == "custom":
+    custom_prompt = st.text_area(
+        "Custom prompt",
+        value="",
+        placeholder="Provide some topics to generate a prompt!",
+    )
+
+if "practice_question" not in st.session_state:
+    st.session_state.practice_question = get_question(prompt_key=selected_prompt_key)
+
+if st.button("Generate Question"):
+    st.session_state.practice_question = get_question(
+        prompt_key=selected_prompt_key,
+        custom_prompt=(custom_prompt.strip() if custom_prompt else None),
+    )
+
+question = st.session_state.practice_question
 
 def init_state():
-    if "question" not in st.session_state:
-        st.session_state.question = get_question()
+    if "practice_question" not in st.session_state:
+        st.session_state.practice_question = get_question()
     if "history" not in st.session_state:
         st.session_state.history = []
     if "theme" not in st.session_state:
@@ -30,7 +57,7 @@ def init_state():
 
 
 def new_prompt():
-    st.session_state.question = get_question()
+    st.session_state.practice_question = get_question()
     st.session_state.history = []
 
 
@@ -92,23 +119,23 @@ def apply_theme():
             """
             <style>
             :root {
-              --bg-start: #0b1020;
-              --bg-mid: #0f172a;
-              --bg-end: #111827;
-              --text: #f3f4f6;
-              --subtext: #9ca3af;
-              --border: #374151;
-              --brand: #34d399;
-              --brand-soft: #102a27;
-              --panel: #111827;
-              --result-bg: #111827;
-              --timer-bg: #1f2937;
-              --timer-text: #f9fafb;
-              --sidebar-bg: #030712;
-              --sidebar-text: #e5e7eb;
-              --button-bg: #34d399;
-              --button-border: #2bbd87;
-              --button-hover: #2bbd87;
+                            --bg-start: var(--night-bg-start);
+                            --bg-mid: var(--night-bg-mid);
+                            --bg-end: var(--night-bg-end);
+                            --text: var(--night-text);
+                            --subtext: var(--night-subtext);
+                            --border: var(--night-border);
+                            --brand: var(--night-brand);
+                            --brand-soft: var(--night-brand-soft);
+                            --panel: var(--night-panel);
+                            --result-bg: var(--night-result-bg);
+                            --timer-bg: var(--night-timer-bg);
+                            --timer-text: var(--night-timer-text);
+                            --sidebar-bg: var(--night-sidebar-bg);
+                            --sidebar-text: var(--night-sidebar-text);
+                            --button-bg: var(--night-button-bg);
+                            --button-border: var(--night-button-border);
+                            --button-hover: var(--night-button-hover);
             }
             </style>
             """,
@@ -119,23 +146,23 @@ def apply_theme():
             """
             <style>
             :root {
-              --bg-start: #eef4ff;
-              --bg-mid: #f6f8fb;
-              --bg-end: #f4f7fa;
-              --text: #1f2937;
-              --subtext: #6b7280;
-              --border: #e5e7eb;
-              --brand: #10a37f;
-              --brand-soft: #e8f8f3;
-              --panel: #ffffff;
-              --result-bg: #ffffff;
-              --timer-bg: #111827;
-              --timer-text: #f9fafb;
-              --sidebar-bg: #0f172a;
-              --sidebar-text: #e5e7eb;
-              --button-bg: #10a37f;
-              --button-border: #0f8f70;
-              --button-hover: #0f8f70;
+                            --bg-start: var(--day-bg-start);
+                            --bg-mid: var(--day-bg-mid);
+                            --bg-end: var(--day-bg-end);
+                            --text: var(--day-text);
+                            --subtext: var(--day-subtext);
+                            --border: var(--day-border);
+                            --brand: var(--day-brand);
+                            --brand-soft: var(--day-brand-soft);
+                            --panel: var(--day-panel);
+                            --result-bg: var(--day-result-bg);
+                            --timer-bg: var(--day-timer-bg);
+                            --timer-text: var(--day-timer-text);
+                            --sidebar-bg: var(--day-sidebar-bg);
+                            --sidebar-text: var(--day-sidebar-text);
+                            --button-bg: var(--day-button-bg);
+                            --button-border: var(--day-button-border);
+                            --button-hover: var(--day-button-hover);
             }
             </style>
             """,
@@ -147,7 +174,6 @@ def toggle_theme():
     st.session_state.theme = "night" if st.session_state.theme == "day" else "day"
 
 
-st.set_page_config(page_title="Japanese Speaking Practice", page_icon="JP", layout="wide")
 init_state()
 load_css()
 apply_theme()
@@ -183,7 +209,7 @@ st.markdown(
     f"""
     <div class="sentence">
       <div class="sentence-label">Practice Sentence</div>
-      <div class="sentence-text">{st.session_state.question}</div>
+            <div class="sentence-text">{st.session_state.practice_question}</div>
     </div>
     """,
     unsafe_allow_html=True,
