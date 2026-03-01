@@ -7,7 +7,6 @@ from faster_whisper import WhisperModel
 MODEL_SIZE = "small"
 DEVICE = "cpu"  # change to "cuda" if you have GPU
 
-
 # Load model once globally
 model = WhisperModel(MODEL_SIZE, device=DEVICE)
 
@@ -15,9 +14,10 @@ model = WhisperModel(MODEL_SIZE, device=DEVICE)
 def transcribe_audio(audio_path: str, language: str = "ja"):
     """
     Transcribe an audio file and return:
-    - transcript (str)
-    - duration (float)
-    - avg_confidence (float)
+    - dict with keys:
+        - 'transcript': full concatenated text
+        - 'segments': list of segment dicts from Whisper
+            Each segment dict contains start, end, text, avg_logprob, etc.
     """
 
     segments, info = model.transcribe(
@@ -27,12 +27,20 @@ def transcribe_audio(audio_path: str, language: str = "ja"):
     )
 
     transcript = ""
-    confidences = []
+    segment_list = []
 
-    for segment in segments:
-        transcript += segment.text
-        confidences.append(np.exp(segment.avg_logprob))
+    for seg in segments:
+        transcript += seg.text
+        # Convert segment object to dict
+        segment_list.append({
+            "start": seg.start,
+            "end": seg.end,
+            "text": seg.text,
+            "avg_logprob": seg.avg_logprob,
+            "tokens": seg.tokens,
+        })
 
-    avg_confidence = np.mean(confidences) if confidences else 0.0
-
-    return transcript.strip(), info.duration, avg_confidence
+    return {
+        "transcript": transcript.strip(),
+        "segments": segment_list
+    }
