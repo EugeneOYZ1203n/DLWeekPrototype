@@ -16,6 +16,7 @@ def evaluate_pronunciation_llm(transcribe_output) -> Dict:
     Returns:
         score_report: dict containing overall score, metrics, and feedback
     """
+    transcript = None
     metrics = {}
 
     # Step 2: define default prompt for the LLM
