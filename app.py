@@ -6,7 +6,7 @@ import tempfile
 import soundfile as sf
 import time
 from transcribe import transcribe_audio
-from question import get_question
+from question import get_question, SAMPLE_PROMPTS
 
 SAMPLE_RATE = 16000
 MAX_DURATION = 60         # seconds
@@ -15,8 +15,29 @@ SILENCE_LIMIT = 4         # seconds
 
 st.title("🇯🇵 Japanese Speaking Practice")
 
-# Practice question
-question = get_question()
+# Practice question controls
+prompt_options = list(SAMPLE_PROMPTS.keys()) + ["custom"]
+style_col, _ = st.columns([1, 3])
+with style_col:
+    selected_prompt_key = st.selectbox("Prompt style", prompt_options, index=0)
+
+custom_prompt = None
+if selected_prompt_key == "custom":
+    custom_prompt = st.text_area(
+        "Custom prompt",
+        value="Create one short Japanese speaking practice sentence. Return only Japanese text.",
+    )
+
+if "practice_question" not in st.session_state:
+    st.session_state.practice_question = get_question(prompt_key=selected_prompt_key)
+
+if st.button("Generate Question"):
+    st.session_state.practice_question = get_question(
+        prompt_key=selected_prompt_key,
+        custom_prompt=(custom_prompt.strip() if custom_prompt else None),
+    )
+
+question = st.session_state.practice_question
 st.subheader("Practice Sentence:")
 st.write(question)
 
