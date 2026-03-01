@@ -1,33 +1,38 @@
 # transcribe.py
-# Handles audio transcription with Faster-Whisper
+# Handles audio transcription using Faster-Whisper
+
+import numpy as np
 from faster_whisper import WhisperModel
-from pydub import AudioSegment
-from typing import Tuple
 
-# Load model globally for efficiency
-model = WhisperModel("small", device="cpu")  # change to "cuda" if GPU available
+MODEL_SIZE = "small"
+DEVICE = "cpu"  # change to "cuda" if you have GPU
 
-def transcribe_audio(audio_path: str, language: str = "ja") -> Tuple[str, float, float]:
+
+# Load model once globally
+model = WhisperModel(MODEL_SIZE, device=DEVICE)
+
+
+def transcribe_audio(audio_path: str, language: str = "ja"):
     """
-    Transcribes a user audio file to text and returns the duration in seconds.
-    
-    Parameters:
-        audio_path: path to audio file
-        language: language code (default: "ja")
-    
-    Returns:
-        transcript: string containing recognized Japanese text
-        duration: audio duration in seconds
+    Transcribe an audio file and return:
+    - transcript (str)
+    - duration (float)
+    - avg_confidence (float)
     """
-    # Transcribe using Faster-Whisper
-    segments, info = model.transcribe(audio_path, language=language)
-    
-    # Combine segments into one transcript string
-    transcript = " ".join(segment.text for segment in segments)
-    
-    return {
-        "transcript": transcript,
-        # Include number of pauses
-        # Duration of silences
-        # Duration of clip
-    }
+
+    segments, info = model.transcribe(
+        audio_path,
+        language=language,
+        beam_size=5
+    )
+
+    transcript = ""
+    confidences = []
+
+    for segment in segments:
+        transcript += segment.text
+        confidences.append(np.exp(segment.avg_logprob))
+
+    avg_confidence = np.mean(confidences) if confidences else 0.0
+
+    return transcript.strip(), info.duration, avg_confidence
