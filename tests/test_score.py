@@ -11,7 +11,7 @@ class TestScoreEngine(unittest.TestCase):
             "total_duration": 8.0,
             "language": "en",
         }
-        report = evaluate_pronunciation(payload, prompt="How can we improve the environment?")
+        report = evaluate_pronunciation(payload, prompt="How can we improve the environment?", use_ollama=False)
 
         self.assertIn("overall_score", report)
         self.assertIn("language", report)
@@ -30,7 +30,7 @@ class TestScoreEngine(unittest.TestCase):
             "total_duration": 6.0,
             "language": "en",
         }
-        report = evaluate_pronunciation(payload, prompt="Say six words.")
+        report = evaluate_pronunciation(payload, prompt="Say six words.", use_ollama=False)
         metrics = report["metrics"]
 
         # 6 words in 0.1 minutes => 60 WPM
@@ -45,7 +45,7 @@ class TestScoreEngine(unittest.TestCase):
             "total_duration": 7.0,
             "language": "en",
         }
-        report = evaluate_pronunciation(payload, prompt="How to improve city life?")
+        report = evaluate_pronunciation(payload, prompt="How to improve city life?", use_ollama=False)
         sgi = report["suggestion_generator_input"]
 
         self.assertEqual(sgi["task"], "generate_learner_feedback_suggestions")
@@ -62,7 +62,7 @@ class TestScoreEngine(unittest.TestCase):
             "total_duration": 8.0,
             "language": "ms",
         }
-        report = evaluate_pronunciation(payload, prompt="Ceritakan tabiat belajar anda.")
+        report = evaluate_pronunciation(payload, prompt="Ceritakan tabiat belajar anda.", use_ollama=False)
 
         self.assertEqual(report["language"], "ms")
         self.assertEqual(report["metrics"]["wpm_target_min"], 95.0)
@@ -71,12 +71,12 @@ class TestScoreEngine(unittest.TestCase):
 
     def test_tamil_tokenization_counts_words(self):
         payload = {
-            "transcript": "நான் தினமும் காலை ஓடுகிறேன் ஏனெனில் அது உடல்நலத்திற்கு நல்லது",
+            "transcript": "à®¨à®¾à®©à¯ à®¤à®¿à®©à®®à¯à®®à¯ à®•à®¾à®²à¯ˆ à®“à®Ÿà¯à®•à®¿à®±à¯‡à®©à¯ à®à®©à¯†à®©à®¿à®²à¯ à®…à®¤à¯ à®‰à®Ÿà®²à¯à®¨à®²à®¤à¯à®¤à®¿à®±à¯à®•à¯ à®¨à®²à¯à®²à®¤à¯",
             "pauses": [{"start": 0.6, "end": 1.0}],
             "total_duration": 8.0,
             "language": "ta",
         }
-        report = evaluate_pronunciation(payload, prompt="உங்கள் பழக்கத்தை விளக்குங்கள்.")
+        report = evaluate_pronunciation(payload, prompt="à®‰à®™à¯à®•à®³à¯ à®ªà®´à®•à¯à®•à®¤à¯à®¤à¯ˆ à®µà®¿à®³à®•à¯à®•à¯à®™à¯à®•à®³à¯.", use_ollama=False)
 
         self.assertEqual(report["language"], "ta")
         # Confirms Tamil script is tokenized rather than dropped.
@@ -91,7 +91,7 @@ class TestScoreEngine(unittest.TestCase):
             "total_duration": 5.0,
             "language": "xx",
         }
-        report = evaluate_pronunciation(payload)
+        report = evaluate_pronunciation(payload, use_ollama=False)
 
         # Report keeps requested language while thresholds use fallback profile.
         self.assertEqual(report["language"], "xx")
@@ -105,7 +105,7 @@ class TestScoreEngine(unittest.TestCase):
             "total_duration": 4.0,
             "language": "en",
         }
-        report = evaluate_pronunciation(payload, prompt="How can we help the environment?")
+        report = evaluate_pronunciation(payload, prompt="How can we help the environment?", use_ollama=False)
         issue_ids = [item["id"] for item in report["issues"]]
 
         self.assertIn("fluency_pause_ratio_high", issue_ids)

@@ -4,7 +4,10 @@ import json
 import re
 from typing import Any, Dict, List
 
-import ollama
+try:
+    import ollama
+except Exception:  # pragma: no cover - optional dependency in some environments
+    ollama = None
 
 
 class SuggestionGenerator:
@@ -87,6 +90,8 @@ Return only valid JSON with this schema:
 """.strip()
 
     def _call_ollama(self, prompt: str) -> str:
+        if ollama is None:
+            raise RuntimeError("ollama package is not available")
         response = ollama.chat(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
@@ -129,7 +134,10 @@ Return only valid JSON with this schema:
         avg_pause_ms = float(speech_metrics.get("avg_pause_ms", 0.0) or 0.0)
         hesitation_count = int(speech_metrics.get("hesitation_count", 0) or 0)
         tone_consistency = float(speech_metrics.get("tone_consistency", 1.0) or 1.0)
-        fluency_score = int(score_report.get("fluency_score", 0) or 0)
+        raw_fluency = score_report.get("fluency_score")
+        if raw_fluency is None and isinstance(score_report.get("subscores"), dict):
+            raw_fluency = score_report["subscores"].get("fluency")
+        fluency_score = int(raw_fluency or 0)
 
         if pause_count > 6 or avg_pause_ms > 900:
             suggestions.append(

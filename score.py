@@ -1,7 +1,16 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+import socket
 from typing import Any, Dict, Iterable, List, Tuple
+from urllib.parse import urlparse
+
+try:
+    import ollama
+except Exception:  # pragma: no cover - optional dependency in some environments
+    ollama = None
 
 # Default category weights (sum should be 1.0)
 DEFAULT_WEIGHTS = {
@@ -520,7 +529,7 @@ def _build_suggestion_generator_input(
     }
 
 
-def evaluate_pronunciation(
+def _evaluate_pronunciation_deterministic(
     input_payload: Dict[str, Any],
     *,
     prompt: str | None = None,
@@ -655,9 +664,253 @@ def evaluate_pronunciation(
     }
 
 
+SCORE_CATEGORIES = ("fluency", "grammar", "vocabulary", "coherence", "clarity_proxy")
+
+
+def _ollama_is_reachable() -> bool:
+    host_raw = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+    parsed = urlparse(host_raw if "://" in host_raw else f"http://{host_raw}")
+    hostname = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 11434
+    try:
+        with socket.create_connection((hostname, port), timeout=0.25):
+            return True
+    except OSError:
+        return False
+
+
+def _parse_json_object(text: str) -> Dict[str, Any]:
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        pass
+
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if not match:
+        return {}
+    try:
+        data = json.loads(match.group(0))
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _coerce_llm_report(
+    llm_data: Dict[str, Any],
+    base_report: Dict[str, Any],
+) -> Dict[str, Any]:
+    weights = base_report["weights"]
+    subscores = dict(base_report["subscores"])
+
+    raw_subscores = llm_data.get("subscores", {})
+    if isinstance(raw_subscores, dict):
+        for cat in SCORE_CATEGORIES:
+            val = raw_subscores.get(cat)
+            if isinstance(val, (int, float)):
+                subscores[cat] = round(_clamp(float(val)), 2)
+
+    overall = llm_data.get("overall_score")
+    if not isinstance(overall, (int, float)):
+        overall = sum(subscores[cat] * weights[cat] for cat in SCORE_CATEGORIES)
+    overall = round(_clamp(float(overall)), 2)
+
+    category_feedback = dict(base_report.get("category_feedback", {}))
+    raw_feedback = llm_data.get("category_feedback", {})
+    if isinstance(raw_feedback, dict):
+        for cat in SCORE_CATEGORIES:
+            val = raw_feedback.get(cat)
+            if isinstance(val, list):
+                cleaned = [str(item).strip() for item in val if str(item).strip()]
+                if cleaned:
+                    category_feedback[cat] = cleaned
+
+    issues = base_report.get("issues", [])
+    raw_issues = llm_data.get("issues", [])
+    if isinstance(raw_issues, list):
+        cleaned_issues: List[Dict[str, Any]] = []
+        for idx, item in enumerate(raw_issues[:10], start=1):
+            if not isinstance(item, dict):
+                continue
+            category = str(item.get("category", "fluency")).strip().lower()
+            if category not in SCORE_CATEGORIES:
+                category = "fluency"
+            severity_raw = item.get("severity", 0.3)
+            severity = float(severity_raw) if isinstance(severity_raw, (int, float)) else 0.3
+            cleaned_issues.append(
+                {
+                    "id": str(item.get("id", f"llm_issue_{idx}")).strip() or f"llm_issue_{idx}",
+                    "category": category,
+                    "severity": round(max(0.0, min(1.0, severity)), 3),
+                    "message": str(item.get("message", "Improvement needed.")).strip() or "Improvement needed.",
+                    "evidence": item.get("evidence", {}) if isinstance(item.get("evidence"), dict) else {},
+                    "suggestion_hint": (
+                        str(item.get("suggestion_hint", "Practice this category with targeted drills.")).strip()
+                        or "Practice this category with targeted drills."
+                    ),
+                }
+            )
+        if cleaned_issues:
+            issues = sorted(cleaned_issues, key=lambda x: x["severity"], reverse=True)
+
+    summary = llm_data.get("feedback_summary")
+    if isinstance(summary, list):
+        feedback_summary = [str(x).strip() for x in summary if str(x).strip()]
+    else:
+        feedback_summary = []
+    if not feedback_summary:
+        feedback_summary = [
+            f"{cat}: {(category_feedback.get(cat) or ['no additional feedback'])[0]}"
+            for cat in SCORE_CATEGORIES
+        ]
+
+    weighted_breakdown = {
+        cat: round(subscores[cat] * weights[cat], 2) for cat in SCORE_CATEGORIES
+    }
+
+    return {
+        "overall_score": overall,
+        "language": base_report["language"],
+        "subscores": subscores,
+        "weights": weights,
+        "weighted_breakdown": weighted_breakdown,
+        "metrics": base_report["metrics"],
+        "category_feedback": category_feedback,
+        "feedback_summary": feedback_summary,
+        "issues": issues,
+        "suggestion_generator_input": _build_suggestion_generator_input(
+            language=base_report["language"],
+            prompt=base_report["suggestion_generator_input"]["prompt"],
+            transcript=base_report["suggestion_generator_input"]["learner_transcript"],
+            overall_score=overall,
+            subscores=subscores,
+            category_feedback=category_feedback,
+            issues=issues,
+            metrics=base_report["metrics"],
+        ),
+    }
+
+
+def _evaluate_with_ollama(
+    *,
+    input_payload: Dict[str, Any],
+    prompt: str | None,
+    base_report: Dict[str, Any],
+    model: str,
+) -> Dict[str, Any]:
+    if ollama is None:
+        raise RuntimeError("ollama package is not available")
+
+    scorer_prompt = f"""
+You are an expert spoken-language scorer.
+Evaluate the learner response and return only valid JSON.
+
+Return schema:
+{{
+  "overall_score": number 0-100,
+  "subscores": {{
+    "fluency": number 0-100,
+    "grammar": number 0-100,
+    "vocabulary": number 0-100,
+    "coherence": number 0-100,
+    "clarity_proxy": number 0-100
+  }},
+  "category_feedback": {{
+    "fluency": ["short reason"],
+    "grammar": ["short reason"],
+    "vocabulary": ["short reason"],
+    "coherence": ["short reason"],
+    "clarity_proxy": ["short reason"]
+  }},
+  "feedback_summary": ["up to 5 bullets"],
+  "issues": [
+    {{
+      "id": "string",
+      "category": "fluency|grammar|vocabulary|coherence|clarity_proxy",
+      "severity": number between 0 and 1,
+      "message": "short issue statement",
+      "evidence": {{}},
+      "suggestion_hint": "specific action"
+    }}
+  ]
+}}
+
+Context:
+- target_language: {base_report["language"]}
+- prompt: {prompt or ""}
+- learner_input: {json.dumps(input_payload, ensure_ascii=False)}
+- baseline_report_for_reference: {json.dumps(base_report, ensure_ascii=False)}
+
+Requirements:
+- Use the baseline only as reference; provide your own evaluation.
+- Keep issues evidence-grounded to transcript/metrics.
+- Return JSON only.
+""".strip()
+
+    response = ollama.chat(
+        model=model,
+        messages=[{"role": "user", "content": scorer_prompt}],
+        format="json",
+        options={"temperature": 0.1},
+    )
+    content = str(response.get("message", {}).get("content", ""))
+    parsed = _parse_json_object(content)
+    if not parsed:
+        raise RuntimeError("Failed to parse scorer JSON from Ollama output")
+    return _coerce_llm_report(parsed, base_report)
+
+
+def evaluate_pronunciation(
+    input_payload: Dict[str, Any],
+    *,
+    prompt: str | None = None,
+    language: str | None = None,
+    weights: Dict[str, float] | None = None,
+    use_ollama: bool = True,
+    model: str | None = None,
+) -> Dict[str, Any]:
+    """
+    Scoring entry point.
+    1) Build deterministic baseline metrics/report
+    2) Ask Ollama model to evaluate and return scoring report
+    3) Fall back to deterministic report if Ollama is unavailable/unparseable
+    """
+    base_report = _evaluate_pronunciation_deterministic(
+        input_payload,
+        prompt=prompt,
+        language=language,
+        weights=weights,
+    )
+
+    if not use_ollama:
+        base_report["metrics"]["scorer"] = "deterministic"
+        return base_report
+
+    selected_model = model or os.getenv("OLLAMA_SCORER_MODEL", "gemma2:2b")
+    if not _ollama_is_reachable():
+        base_report["metrics"]["scorer"] = "deterministic_fallback"
+        base_report["metrics"]["scorer_model"] = selected_model
+        base_report["metrics"]["scorer_error"] = "Ollama server is not reachable"
+        return base_report
+
+    try:
+        llm_report = _evaluate_with_ollama(
+            input_payload=input_payload,
+            prompt=prompt,
+            base_report=base_report,
+            model=selected_model,
+        )
+        llm_report["metrics"]["scorer"] = "ollama"
+        llm_report["metrics"]["scorer_model"] = selected_model
+        return llm_report
+    except Exception as exc:
+        base_report["metrics"]["scorer"] = "deterministic_fallback"
+        base_report["metrics"]["scorer_model"] = selected_model
+        base_report["metrics"]["scorer_error"] = str(exc)
+        return base_report
+
+
 def evaluate_pronunciation_llm(transcribe_output: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Compatibility wrapper.
-    Keep this function name so callers don't break while using deterministic scoring.
-    """
-    return evaluate_pronunciation(transcribe_output)
+    return evaluate_pronunciation(transcribe_output, use_ollama=True)
