@@ -1,6 +1,6 @@
 import unittest
 
-from score import evaluate_pronunciation
+from archive.score_archive import evaluate_pronunciation
 
 
 class TestScoreEngine(unittest.TestCase):
