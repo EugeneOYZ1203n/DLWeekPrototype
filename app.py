@@ -9,7 +9,7 @@ import sounddevice as sd
 import soundfile as sf
 import streamlit as st
 
-from question import get_question
+from question import get_question, SAMPLE_PROMPTS
 from score import evaluate_pronunciation
 from transcribe import transcribe_audio
 
@@ -18,46 +18,43 @@ MAX_DURATION = 60
 SILENCE_THRESHOLD = 0.01
 SILENCE_LIMIT = 4
 CSS_FILE = Path(__file__).parent / "styles" / "app.css"
+LANGUAGE_OPTIONS = ["ja", "en", "ms", "ta", "zh", "es", "fr", "de"]
 
-st.set_page_config(page_title="Japanese Speaking Practice", page_icon="JP", layout="wide")
+st.set_page_config(page_title="Conversation Speaking Practice", page_icon="JP", layout="wide")
 
+if "selected_language" not in st.session_state:
+    st.session_state.selected_language = "ja"
 
-# Practice question controls
-prompt_options = list(SAMPLE_PROMPTS.keys()) + ["custom"]
-style_col, _ = st.columns([1, 3])
-with style_col:
-    selected_prompt_key = st.selectbox("Prompt style", prompt_options, index=0)
+if "selected_prompt_key" not in st.session_state:
+    st.session_state.selected_prompt_key = "beginner"
 
-custom_prompt = None
-if selected_prompt_key == "custom":
-    custom_prompt = st.text_area(
-        "Custom prompt",
-        value="",
-        placeholder="Provide some topics to generate a prompt!",
-    )
+if "custom_prompt_text" not in st.session_state:
+    st.session_state.custom_prompt_text = ""
 
 if "practice_question" not in st.session_state:
-    st.session_state.practice_question = get_question(prompt_key=selected_prompt_key)
-
-if st.button("Generate Question"):
     st.session_state.practice_question = get_question(
-        prompt_key=selected_prompt_key,
-        custom_prompt=(custom_prompt.strip() if custom_prompt else None),
+        prompt_key=st.session_state.get("selected_prompt_key", "beginner"),
+        custom_prompt=(st.session_state.get("custom_prompt_text", "").strip() or None),
+        target_language=st.session_state.selected_language,
     )
-
-question = st.session_state.practice_question
 
 def init_state():
     if "practice_question" not in st.session_state:
-        st.session_state.practice_question = get_question()
+        st.session_state.practice_question = get_question(
+            target_language=st.session_state.get("selected_language", "ja")
+        )
     if "history" not in st.session_state:
         st.session_state.history = []
     if "theme" not in st.session_state:
         st.session_state.theme = "day"
 
 
-def new_prompt():
-    st.session_state.practice_question = get_question()
+def on_language_change():
+    st.session_state.practice_question = get_question(
+        prompt_key=st.session_state.get("selected_prompt_key", "beginner"),
+        custom_prompt=(st.session_state.get("custom_prompt_text", "").strip() or None),
+        target_language=st.session_state.get("selected_language", "ja"),
+    )
     st.session_state.history = []
 
 
@@ -181,13 +178,13 @@ apply_theme()
 with st.sidebar:
     st.header("Session")
     st.caption("Speaking practice controls")
-    selected_language = st.selectbox(
+    st.selectbox(
         "Response language",
-        options=["ja", "en", "ms", "ta", "zh", "es", "fr", "de"],
-        index=0,
+        options=LANGUAGE_OPTIONS,
+        key="selected_language",
+        on_change=on_language_change,
         help="Language code used for transcription + scoring.",
     )
-    st.button("New Sentence", use_container_width=True, on_click=new_prompt)
     theme_label = (
         "Switch to Night Mode"
         if st.session_state.theme == "day"
@@ -200,7 +197,7 @@ with st.sidebar:
     st.caption(f"Silence stop: {SILENCE_LIMIT}s")
     st.caption("Tip: Speak clearly and at a steady pace.")
 
-st.markdown('<p class="title">Japanese Speaking Practice</p>', unsafe_allow_html=True)
+st.markdown('<p class="title">Conversation Speaking Practice</p>', unsafe_allow_html=True)
 st.markdown(
     '<p class="subtitle">Record your voice, then review transcript and confidence.</p>',
     unsafe_allow_html=True,
@@ -215,9 +212,36 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+record_clicked = st.button("Record", use_container_width=True)
+
+prompt_options = list(SAMPLE_PROMPTS.keys()) + ["custom"]
+style_col, _ = st.columns([1, 3])
+with style_col:
+    selected_prompt_key = st.selectbox(
+        "Prompt style",
+        prompt_options,
+        key="selected_prompt_key",
+    )
+
+custom_prompt = None
+if selected_prompt_key == "custom":
+    custom_prompt = st.text_area(
+        "Custom prompt",
+        key="custom_prompt_text",
+        placeholder="Provide some topics to generate a prompt!",
+    )
+
+if st.button("Generate Question"):
+    st.session_state.practice_question = get_question(
+        prompt_key=selected_prompt_key,
+        custom_prompt=(custom_prompt.strip() if custom_prompt else None),
+        target_language=st.session_state.get("selected_language", "ja"),
+    )
+
 timer_placeholder = st.empty()
 
-if st.button("Record", use_container_width=True):
+if record_clicked:
+    active_language = st.session_state.get("selected_language", "ja")
     audio_array, elapsed_time = record_audio(timer_placeholder)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
@@ -228,20 +252,20 @@ if st.button("Record", use_container_width=True):
         audio_bytes = audio_file.read()
 
     with st.spinner("Transcribing..."):
-        result = transcribe_audio(temp_path, language=selected_language)
+        result = transcribe_audio(temp_path, language=active_language)
 
     pauses = build_pause_spans(result["segments"])
     scoring_payload = {
         "transcript": result["transcript"],
         "pauses": pauses,
         "total_duration": float(elapsed_time),
-        "language": selected_language,
+        "language": active_language,
     }
     with st.spinner("Scoring response..."):
         score_report = evaluate_pronunciation(
             scoring_payload,
-            prompt=st.session_state.question,
-            language=selected_language,
+            prompt=st.session_state.practice_question,
+            language=active_language,
         )
 
     segment_confidences = [np.exp(seg["avg_logprob"]) for seg in result["segments"]]

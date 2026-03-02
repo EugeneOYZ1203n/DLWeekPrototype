@@ -1,4 +1,5 @@
 :root {
+  --app-top-offset: 5rem;
   --day-bg-start: #eef4ff;
   --day-bg-mid: #f6f8fb;
   --day-bg-end: #f4f7fa;
@@ -16,6 +17,9 @@
   --day-button-bg: #10a37f;
   --day-button-border: #0f8f70;
   --day-button-hover: #0f8f70;
+  --day-sidebar-select-bg: #1e293b;
+  --day-sidebar-select-border: #334155;
+  --day-sidebar-select-text: #f8fafc;
 
   --night-bg-start: #0b1020;
   --night-bg-mid: #0f172a;
@@ -34,6 +38,9 @@
   --night-button-bg: #34d399;
   --night-button-border: #2bbd87;
   --night-button-hover: #2bbd87;
+  --night-sidebar-select-bg: #111827;
+  --night-sidebar-select-border: #374151;
+  --night-sidebar-select-text: #f3f4f6;
 
   --bg-start: var(--day-bg-start);
   --bg-mid: var(--day-bg-mid);
@@ -52,6 +59,9 @@
   --button-bg: var(--day-button-bg);
   --button-border: var(--day-button-border);
   --button-hover: var(--day-button-hover);
+  --sidebar-select-bg: var(--day-sidebar-select-bg);
+  --sidebar-select-border: var(--day-sidebar-select-border);
+  --sidebar-select-text: var(--day-sidebar-select-text);
 }
 
 .stApp {
@@ -60,7 +70,7 @@
 
 .block-container {
   max-width: 1120px;
-  padding-top: 4rem;
+  padding-top: calc(var(--app-top-offset) + env(safe-area-inset-top));
 }
 
 .title {
@@ -151,6 +161,24 @@
   color: var(--text);
 }
 
+section.main [data-testid="stSelectbox"] > div,
+section.main [data-testid="stTextArea"] > div {
+  background: var(--brand-soft);
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--brand);
+  border-radius: 14px;
+  padding: 0.75rem 0.85rem;
+}
+
+section.main [data-testid="stSelectbox"] label,
+section.main [data-testid="stTextArea"] label {
+  color: var(--subtext) !important;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 [data-baseweb="select"] > div {
   background: var(--panel);
   border-color: var(--border);
@@ -160,10 +188,37 @@
   color: var(--text);
 }
 
+section.main [data-testid="stSelectbox"] [data-baseweb="select"] > div {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+section.main [data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 28%, transparent);
+}
+
+[data-testid="stSidebar"] [data-baseweb="select"] > div {
+  background: var(--sidebar-select-bg) !important;
+  border-color: var(--sidebar-select-border) !important;
+}
+
+[data-testid="stSidebar"] [data-baseweb="select"] * {
+  color: var(--sidebar-select-text) !important;
+  fill: var(--sidebar-select-text) !important;
+}
+
 [data-testid="stTextArea"] textarea {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+section.main [data-testid="stTextArea"] textarea:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 28%, transparent);
 }
 
 [data-testid="stTextArea"] label {
