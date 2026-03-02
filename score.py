@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+import socket
+import urllib.error
+import urllib.request
 from typing import Any, Dict, Iterable, List, Tuple
 
-# Default category weights (sum should be 1.0)
 DEFAULT_WEIGHTS = {
     "fluency": 0.30,
     "grammar": 0.25,
@@ -12,63 +16,15 @@ DEFAULT_WEIGHTS = {
     "clarity_proxy": 0.05,
 }
 
-LANGUAGE_PROFILES: Dict[str, Dict[str, Any]] = {
-    "en": {
-        "token_mode": "word",
-        "wpm_target_min": 90,
-        "wpm_target_max": 150,
-        "filler_words": {"um", "uh", "erm", "hmm", "like", "you know", "sort of", "kind of"},
-        "linking_words": {"because", "so", "therefore", "however", "first", "then", "finally"},
-    },
-    "ja": {
-        "token_mode": "cjk_char",
-        "wpm_target_min": 120,
-        "wpm_target_max": 220,
-        "filler_words": {"えっと", "あの", "その", "まあ"},
-        "linking_words": {"だから", "でも", "そして", "まず", "次に", "最後に"},
-    },
-    "zh": {
-        "token_mode": "cjk_char",
-        "wpm_target_min": 120,
-        "wpm_target_max": 220,
-        "filler_words": {"嗯", "那个", "这个"},
-        "linking_words": {"因为", "所以", "但是", "首先", "然后", "最后"},
-    },
-    "es": {
-        "token_mode": "word",
-        "wpm_target_min": 95,
-        "wpm_target_max": 165,
-        "filler_words": {"eh", "este", "pues", "o sea"},
-        "linking_words": {"porque", "entonces", "sin embargo", "primero", "luego", "finalmente"},
-    },
-    "fr": {
-        "token_mode": "word",
-        "wpm_target_min": 95,
-        "wpm_target_max": 165,
-        "filler_words": {"euh", "ben"},
-        "linking_words": {"parce que", "donc", "cependant", "d'abord", "puis", "finalement"},
-    },
-    "de": {
-        "token_mode": "word",
-        "wpm_target_min": 90,
-        "wpm_target_max": 155,
-        "filler_words": {"äh", "hm"},
-        "linking_words": {"weil", "also", "jedoch", "zuerst", "dann", "schließlich"},
-    },
-    "ms": {
-        "token_mode": "word",
-        "wpm_target_min": 95,
-        "wpm_target_max": 160,
-        "filler_words": {"erm", "eee", "apa", "macam", "kan"},
-        "linking_words": {"kerana", "jadi", "tetapi", "pertama", "kemudian", "akhirnya"},
-    },
-    "ta": {
-        "token_mode": "tamil_word",
-        "wpm_target_min": 90,
-        "wpm_target_max": 155,
-        "filler_words": {"அம்", "அஹ்", "அப்படின்னா", "ம்ம்ம்"},
-        "linking_words": {"ஏனெனில்", "அதனால்", "ஆனால்", "முதலில்", "பிறகு", "இறுதியாக"},
-    },
+LANGUAGE_NAMES = {
+    "en": "English",
+    "ja": "Japanese",
+    "zh": "Chinese",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "ms": "Malay",
+    "ta": "Tamil",
 }
 
 
@@ -77,12 +33,6 @@ def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
 
 
 def _extract_pause_spans(pauses: Any) -> List[Tuple[float, float]]:
-    """
-    Accepts:
-    - list[{"start": x, "end": y}]
-    - dict[str, {"start": x, "end": y}] or dict[str, [x, y]]
-    - list[[x, y]]
-    """
     if pauses is None:
         return []
 
@@ -120,356 +70,217 @@ def _extract_pause_spans(pauses: Any) -> List[Tuple[float, float]]:
     return spans
 
 
-def _get_language_profile(language: str | None) -> Dict[str, Any]:
-    if not language:
-        return LANGUAGE_PROFILES["en"]
-    normalized = language.lower().split("-")[0].strip()
-    return LANGUAGE_PROFILES.get(normalized, LANGUAGE_PROFILES["en"])
+def _tokenize(transcript: str) -> List[str]:
+    return re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ']+|[\u0B80-\u0BFF]+|[\u3040-\u30ff\u3400-\u9fff]+|\d+", transcript.lower())
 
 
-def _tokenize(transcript: str, token_mode: str = "word") -> List[str]:
-    """
-    Tokenizer that works for Latin words and also captures CJK runs.
-    For CJK runs, split to characters as a rough "word-like" unit.
-    """
-    rough_tokens = re.findall(
-        r"[A-Za-zÀ-ÖØ-öø-ÿ']+|[\u0B80-\u0BFF]+|[\u3040-\u30ff\u3400-\u9fff]+|\d+",
-        transcript.lower(),
-    )
-    tokens: List[str] = []
-    for token in rough_tokens:
-        if token_mode == "cjk_char" and re.fullmatch(r"[\u3040-\u30ff\u3400-\u9fff]+", token):
-            tokens.extend(list(token))
-        else:
-            tokens.append(token)
-    return tokens
+def _metrics_from_payload(transcript: str, pauses: List[Tuple[float, float]], total_duration: float) -> Dict[str, Any]:
+    tokens = _tokenize(transcript)
+    num_words = len(tokens)
+    total_pause_seconds = sum(end - start for start, end in pauses)
+    total_pause_seconds = min(total_pause_seconds, max(total_duration, 0.0))
+    duration_minutes = max(total_duration / 60.0, 1e-9)
+
+    return {
+        "num_words": num_words,
+        "total_duration_seconds": round(total_duration, 3),
+        "pause_count": len(pauses),
+        "total_pause_seconds": round(total_pause_seconds, 3),
+        "wpm": round(num_words / duration_minutes if total_duration > 0 else 0.0, 2),
+        "pause_ratio": round(total_pause_seconds / total_duration if total_duration > 0 else 0.0, 4),
+    }
 
 
-def _score_fluency(
-    wpm: float,
-    pause_ratio: float,
-    filler_ratio: float,
-    wpm_target_min: float,
-    wpm_target_max: float,
-) -> Tuple[float, List[str], List[Dict[str, Any]]]:
-    reasons: List[str] = []
-    issues: List[Dict[str, Any]] = []
-    score = 100.0
+def _extract_json_object(text: str) -> Dict[str, Any]:
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
 
-    if wpm < wpm_target_min:
-        penalty = min(35.0, (wpm_target_min - wpm) * 0.45)
-        score -= penalty
-        reasons.append(f"wpm was {wpm:.1f} (target {wpm_target_min}-{wpm_target_max})")
-        issues.append(
-            {
-                "id": "fluency_wpm_low",
-                "category": "fluency",
-                "severity": round(min(1.0, (wpm_target_min - wpm) / max(1.0, wpm_target_min)), 3),
-                "message": "Speaking pace is below target.",
-                "evidence": {"actual": round(wpm, 2), "target_min": wpm_target_min, "target_max": wpm_target_max},
-                "suggestion_hint": "Practice short timed answers and aim for one complete sentence every 5-7 seconds.",
-            }
-        )
-    elif wpm > wpm_target_max:
-        penalty = min(20.0, (wpm - wpm_target_max) * 0.25)
-        score -= penalty
-        reasons.append(f"wpm was {wpm:.1f} (target {wpm_target_min}-{wpm_target_max})")
-        issues.append(
-            {
-                "id": "fluency_wpm_high",
-                "category": "fluency",
-                "severity": round(min(1.0, (wpm - wpm_target_max) / max(1.0, wpm_target_max)), 3),
-                "message": "Speaking pace is above target.",
-                "evidence": {"actual": round(wpm, 2), "target_min": wpm_target_min, "target_max": wpm_target_max},
-                "suggestion_hint": "Slow down slightly and add clearer phrase boundaries.",
-            }
-        )
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return json.loads(text[start : end + 1])
 
-    if pause_ratio > 0.12:
-        penalty = min(45.0, (pause_ratio - 0.12) * 220)
-        score -= penalty
-        reasons.append(f"pause ratio was {pause_ratio * 100:.1f}% (target < 12%)")
-        issues.append(
-            {
-                "id": "fluency_pause_ratio_high",
-                "category": "fluency",
-                "severity": round(min(1.0, (pause_ratio - 0.12) / 0.12), 3),
-                "message": "Too much silence between chunks of speech.",
-                "evidence": {"actual": round(pause_ratio, 4), "target_max": 0.12},
-                "suggestion_hint": "Use simple templates and pre-plan sentence openings to reduce long pauses.",
-            }
-        )
-
-    if filler_ratio > 0.03:
-        penalty = min(20.0, (filler_ratio - 0.03) * 200)
-        score -= penalty
-        reasons.append(f"filler ratio was {filler_ratio * 100:.1f}% (target < 3%)")
-        issues.append(
-            {
-                "id": "fluency_filler_ratio_high",
-                "category": "fluency",
-                "severity": round(min(1.0, (filler_ratio - 0.03) / 0.07), 3),
-                "message": "Frequent filler words reduce fluency.",
-                "evidence": {"actual": round(filler_ratio, 4), "target_max": 0.03},
-                "suggestion_hint": "Replace fillers with short silent planning pauses (<1s).",
-            }
-        )
-
-    if not reasons:
-        reasons.append("speech pace and pause control were in target range")
-    return _clamp(score), reasons, issues
+    raise json.JSONDecodeError("No JSON object found", text, 0)
 
 
-def _score_grammar(transcript: str, tokens: List[str]) -> Tuple[float, List[str], List[Dict[str, Any]]]:
-    reasons: List[str] = []
-    issues: List[Dict[str, Any]] = []
-    score = 100.0
-
-    if not transcript.strip():
-        return 0.0, ["no transcript detected"], [
-            {
-                "id": "grammar_no_transcript",
-                "category": "grammar",
-                "severity": 1.0,
-                "message": "No transcript detected for grammar scoring.",
-                "evidence": {},
-                "suggestion_hint": "Capture a clearer recording and retry.",
-            }
-        ]
-
-    # Proxy checks only; replace with LLM/parser later for deeper accuracy.
-    sentence_end_ok = transcript.strip().endswith((".", "?", "!", "。", "？", "！"))
-    if not sentence_end_ok:
-        score -= 10
-        reasons.append("sentence end punctuation is missing")
-        issues.append(
-            {
-                "id": "grammar_sentence_boundary",
-                "category": "grammar",
-                "severity": 0.25,
-                "message": "Sentence boundary markers are unclear.",
-                "evidence": {"sentence_end_punctuation": False},
-                "suggestion_hint": "Practice producing complete sentence endings.",
-            }
-        )
-
-    repeated_token_count = 0
-    for i in range(1, len(tokens)):
-        if tokens[i] == tokens[i - 1]:
-            repeated_token_count += 1
-    if repeated_token_count > 0:
-        penalty = min(25.0, repeated_token_count * 8.0)
-        score -= penalty
-        reasons.append(f"found {repeated_token_count} repeated adjacent token(s)")
-        issues.append(
-            {
-                "id": "grammar_repetition",
-                "category": "grammar",
-                "severity": round(min(1.0, repeated_token_count / 3), 3),
-                "message": "Repeated adjacent words suggest disfluency or correction loops.",
-                "evidence": {"repeated_adjacent_tokens": repeated_token_count},
-                "suggestion_hint": "Use shorter clauses and pause at phrase boundaries instead of repeating words.",
-            }
-        )
-
-    if len(tokens) < 3:
-        score -= 18
-        reasons.append("answer is very short for grammar assessment")
-        issues.append(
-            {
-                "id": "grammar_too_short",
-                "category": "grammar",
-                "severity": 0.5,
-                "message": "Insufficient length to demonstrate grammar control.",
-                "evidence": {"token_count": len(tokens)},
-                "suggestion_hint": "Aim for at least one full sentence with a subject and predicate.",
-            }
-        )
-
-    if not reasons:
-        reasons.append("basic sentence form looked consistent")
-    return _clamp(score), reasons, issues
-
-
-def _score_vocabulary(tokens: List[str]) -> Tuple[float, List[str], Dict[str, float], List[Dict[str, Any]]]:
-    reasons: List[str] = []
-    issues: List[Dict[str, Any]] = []
-    score = 100.0
-    metrics: Dict[str, float] = {}
-
-    if not tokens:
-        return 0.0, ["no words detected"], {"lexical_diversity": 0.0}, [
-            {
-                "id": "vocab_no_words",
-                "category": "vocabulary",
-                "severity": 1.0,
-                "message": "No words detected for vocabulary scoring.",
-                "evidence": {},
-                "suggestion_hint": "Ensure microphone input is captured correctly.",
-            }
-        ]
-
-    unique_count = len(set(tokens))
-    token_count = len(tokens)
-    lexical_diversity = unique_count / token_count
-    metrics["lexical_diversity"] = round(lexical_diversity, 4)
-
-    # Range proxy.
-    if lexical_diversity < 0.45:
-        score -= min(35.0, (0.45 - lexical_diversity) * 120)
-        reasons.append(
-            f"lexical diversity was {lexical_diversity:.2f} (target >= 0.45 for simple answers)"
-        )
-        issues.append(
-            {
-                "id": "vocab_range_low",
-                "category": "vocabulary",
-                "severity": round(min(1.0, (0.45 - lexical_diversity) / 0.30), 3),
-                "message": "Vocabulary range is limited for this response.",
-                "evidence": {"actual": round(lexical_diversity, 4), "target_min": 0.45},
-                "suggestion_hint": "Introduce one or two precise content words related to the prompt topic.",
-            }
-        )
-    elif lexical_diversity > 0.9 and token_count < 8:
-        # Very short responses can look diverse but still weak.
-        score -= 8
-        reasons.append("vocabulary range looked inflated by short answer length")
-
-    avg_token_len = sum(len(t) for t in tokens) / token_count
-    metrics["avg_token_length"] = round(avg_token_len, 2)
-    if avg_token_len < 3 and token_count >= 8:
-        score -= 8
-        reasons.append("word choices were mostly very short/simple")
-        issues.append(
-            {
-                "id": "vocab_word_complexity_low",
-                "category": "vocabulary",
-                "severity": 0.25,
-                "message": "Word complexity is low for the response length.",
-                "evidence": {"avg_token_length": round(avg_token_len, 2)},
-                "suggestion_hint": "Use at least one descriptive adjective or specific noun.",
-            }
-        )
-
-    if not reasons:
-        reasons.append("word variety was appropriate for the response length")
-    return _clamp(score), reasons, metrics, issues
-
-
-def _score_coherence(
+def _build_llm_prompt(
+    *,
     transcript: str,
-    tokens: List[str],
-    linking_words: set[str],
-    prompt: str | None = None,
-    prompt_tokens: List[str] | None = None,
-) -> Tuple[float, List[str], List[Dict[str, Any]]]:
-    reasons: List[str] = []
+    prompt: str | None,
+    language: str,
+    metrics: Dict[str, Any],
+    weights: Dict[str, float],
+) -> str:
+    language_name = LANGUAGE_NAMES.get(language.split("-")[0], language)
+    rubric = {
+        "fluency": "flow, pauses, pace consistency",
+        "grammar": "syntactic correctness and sentence well-formedness",
+        "vocabulary": "range and appropriateness of word choice",
+        "coherence": "relevance and logical structure",
+        "clarity_proxy": "how clear/confident delivery appears from transcript and timing",
+    }
+
+    schema = {
+        "overall_score": "number 0-100",
+        "subscores": {
+            "fluency": "number 0-100",
+            "grammar": "number 0-100",
+            "vocabulary": "number 0-100",
+            "coherence": "number 0-100",
+            "clarity_proxy": "number 0-100",
+        },
+        "category_feedback": {
+            "fluency": ["short reason strings"],
+            "grammar": ["short reason strings"],
+            "vocabulary": ["short reason strings"],
+            "coherence": ["short reason strings"],
+            "clarity_proxy": ["short reason strings"],
+        },
+        "issues": [
+            {
+                "id": "snake_case",
+                "category": "fluency|grammar|vocabulary|coherence|clarity_proxy",
+                "severity": "number 0-1",
+                "message": "short issue summary",
+                "evidence": {"any": "json"},
+                "suggestion_hint": "short actionable hint",
+            }
+        ],
+        "strengths": [
+            {
+                "category": "fluency|grammar|vocabulary|coherence|clarity_proxy",
+                "message": "short strength statement",
+            }
+        ],
+        "feedback_summary": ["up to 5 concise bullets"],
+    }
+
+    return (
+        "You are an expert language proficiency evaluator. "
+        "Grade the learner response ONLY by qualitative judgment. "
+        "Do not use deterministic formulas to compute scores.\n\n"
+        f"Language: {language_name}\n"
+        f"Prompt question: {prompt or '(none provided)'}\n"
+        f"Learner transcript: {transcript or '(empty)'}\n"
+        f"Timing context: {json.dumps(metrics, ensure_ascii=False)}\n"
+        f"Weights (for overall score): {json.dumps(weights)}\n"
+        f"Rubric notes: {json.dumps(rubric)}\n\n"
+        "Return STRICT JSON only, matching this schema and field names exactly:\n"
+        f"{json.dumps(schema, ensure_ascii=False)}\n\n"
+        "Rules:\n"
+        "1) Keep scores between 0 and 100.\n"
+        "2) Keep severity between 0 and 1.\n"
+        "3) category_feedback must explain score decisions with specific evidence from transcript/timing.\n"
+        "4) issues should be sorted by severity descending.\n"
+        "5) Keep reasons concise and actionable."
+    )
+
+
+def _call_ollama_json(prompt_text: str) -> Dict[str, Any]:
+    model = os.getenv("SCORING_MODEL", "gemma3:4b")
+    endpoint = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434/api/generate").strip()
+    if endpoint.endswith("/"):
+        endpoint = endpoint[:-1]
+    if "/api/" not in endpoint:
+        endpoint = endpoint + "/api/generate"
+    timeout_seconds = float(os.getenv("SCORING_TIMEOUT_SECONDS", "90"))
+
+    body = {
+        "model": model,
+        "prompt": prompt_text,
+        "stream": False,
+        "format": "json",
+        "options": {
+            "temperature": 0.2,
+        },
+    }
+
+    req = urllib.request.Request(
+        endpoint,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+        api_error = payload.get("error")
+        if api_error:
+            raise ValueError(f"Ollama API error: {api_error}")
+        text = str(payload.get("response", "")).strip()
+        if not text:
+            raise ValueError("LLM response was empty")
+        return _extract_json_object(text)
+
+
+def _normalize_llm_output(llm_output: Dict[str, Any], weights: Dict[str, float]) -> Dict[str, Any]:
+    subscores_in = llm_output.get("subscores") or {}
+    subscores = {
+        "fluency": _clamp(float(subscores_in.get("fluency", 0))),
+        "grammar": _clamp(float(subscores_in.get("grammar", 0))),
+        "vocabulary": _clamp(float(subscores_in.get("vocabulary", 0))),
+        "coherence": _clamp(float(subscores_in.get("coherence", 0))),
+        "clarity_proxy": _clamp(float(subscores_in.get("clarity_proxy", 0))),
+    }
+
+    reported_overall = llm_output.get("overall_score")
+    if reported_overall is None:
+        overall = sum(subscores[k] * float(weights[k]) for k in weights)
+    else:
+        overall = _clamp(float(reported_overall))
+
+    weighted_breakdown = {k: round(subscores[k] * float(weights[k]), 2) for k in weights}
+
+    category_feedback_in = llm_output.get("category_feedback") or {}
+    category_feedback = {
+        "fluency": list(category_feedback_in.get("fluency") or []),
+        "grammar": list(category_feedback_in.get("grammar") or []),
+        "vocabulary": list(category_feedback_in.get("vocabulary") or []),
+        "coherence": list(category_feedback_in.get("coherence") or []),
+        "clarity_proxy": list(category_feedback_in.get("clarity_proxy") or []),
+    }
+
     issues: List[Dict[str, Any]] = []
-    score = 100.0
-
-    if not transcript.strip():
-        return 0.0, ["no transcript detected"], [
-            {
-                "id": "coherence_no_transcript",
-                "category": "coherence",
-                "severity": 1.0,
-                "message": "No transcript detected for coherence scoring.",
-                "evidence": {},
-                "suggestion_hint": "Capture a clearer recording and retry.",
-            }
-        ]
-
-    # Length proxy for completeness.
-    if len(tokens) < 4:
-        score -= 25
-        reasons.append("answer length is too short to fully develop an idea")
+    for item in list(llm_output.get("issues") or []):
+        if not isinstance(item, dict):
+            continue
         issues.append(
             {
-                "id": "coherence_too_short",
-                "category": "coherence",
-                "severity": 0.6,
-                "message": "Answer is too short to show idea development.",
-                "evidence": {"token_count": len(tokens)},
-                "suggestion_hint": "Respond with at least two connected clauses.",
+                "id": str(item.get("id", "issue_unknown")),
+                "category": str(item.get("category", "coherence")),
+                "severity": round(max(0.0, min(1.0, float(item.get("severity", 0.0)))), 3),
+                "message": str(item.get("message", "")),
+                "evidence": item.get("evidence", {}),
+                "suggestion_hint": str(item.get("suggestion_hint", "")),
             }
         )
 
-    # Basic connector usage proxy for logic flow.
-    connector_hits = sum(1 for t in tokens if t in linking_words)
-    if len(tokens) >= 10 and connector_hits == 0:
-        score -= 10
-        reasons.append("few linking words were used to connect ideas")
-        issues.append(
-            {
-                "id": "coherence_linkers_missing",
-                "category": "coherence",
-                "severity": 0.3,
-                "message": "Few explicit connectors were detected.",
-                "evidence": {"connector_hits": connector_hits},
-                "suggestion_hint": "Use a connector such as 'because/therefore/however' to join ideas.",
-            }
-        )
+    issues.sort(key=lambda x: x.get("severity", 0.0), reverse=True)
 
-    # Prompt overlap proxy for relevance.
-    if prompt:
-        prompt_token_set = set(prompt_tokens or [])
-        if prompt_token_set:
-            overlap = len(set(tokens) & prompt_token_set) / max(1, len(prompt_token_set))
-            if overlap < 0.05:
-                score -= 20
-                reasons.append("low overlap with prompt keywords suggests weak relevance")
-                issues.append(
-                    {
-                        "id": "coherence_prompt_relevance_low",
-                        "category": "coherence",
-                        "severity": round(min(1.0, (0.05 - overlap) / 0.05), 3),
-                        "message": "Response appears weakly tied to the prompt.",
-                        "evidence": {"keyword_overlap_ratio": round(overlap, 4), "target_min": 0.05},
-                        "suggestion_hint": "Reuse 1-2 prompt keywords in your answer and expand on them.",
-                    }
-                )
+    strengths: List[Dict[str, Any]] = []
+    for item in list(llm_output.get("strengths") or []):
+        if isinstance(item, dict):
+            strengths.append(
+                {
+                    "category": str(item.get("category", "coherence")),
+                    "message": str(item.get("message", "")),
+                }
+            )
 
-    if not reasons:
-        reasons.append("answer stayed on-topic and sufficiently developed")
-    return _clamp(score), reasons, issues
+    feedback_summary = [str(x) for x in list(llm_output.get("feedback_summary") or [])]
 
-
-def _score_clarity_proxy(filler_ratio: float, pause_ratio: float) -> Tuple[float, List[str], List[Dict[str, Any]]]:
-    reasons: List[str] = []
-    issues: List[Dict[str, Any]] = []
-    score = 100.0
-
-    if filler_ratio > 0.05:
-        score -= min(55.0, (filler_ratio - 0.05) * 300)
-        reasons.append(f"filler ratio was {filler_ratio * 100:.1f}% (target < 5%)")
-        issues.append(
-            {
-                "id": "clarity_filler_high",
-                "category": "clarity_proxy",
-                "severity": round(min(1.0, (filler_ratio - 0.05) / 0.10), 3),
-                "message": "Frequent fillers reduce perceived clarity/confidence.",
-                "evidence": {"actual": round(filler_ratio, 4), "target_max": 0.05},
-                "suggestion_hint": "Pause silently for a brief moment instead of using fillers.",
-            }
-        )
-
-    if pause_ratio > 0.2:
-        score -= min(45.0, (pause_ratio - 0.2) * 180)
-        reasons.append(f"long pauses reduced clarity proxy (pause ratio {pause_ratio * 100:.1f}%)")
-        issues.append(
-            {
-                "id": "clarity_pause_high",
-                "category": "clarity_proxy",
-                "severity": round(min(1.0, (pause_ratio - 0.2) / 0.2), 3),
-                "message": "Long pauses reduce clarity/confidence signal.",
-                "evidence": {"actual": round(pause_ratio, 4), "target_max": 0.2},
-                "suggestion_hint": "Chunk your answer into two short planned phrases.",
-            }
-        )
-
-    if not reasons:
-        reasons.append("delivery sounded consistently clear by pause/filler proxies")
-    return _clamp(score), reasons, issues
+    return {
+        "overall_score": round(overall, 2),
+        "subscores": {k: round(v, 2) for k, v in subscores.items()},
+        "weighted_breakdown": weighted_breakdown,
+        "category_feedback": category_feedback,
+        "issues": issues,
+        "strengths": strengths,
+        "feedback_summary": feedback_summary,
+    }
 
 
 def _build_suggestion_generator_input(
@@ -477,36 +288,22 @@ def _build_suggestion_generator_input(
     language: str,
     prompt: str | None,
     transcript: str,
-    overall_score: float,
-    subscores: Dict[str, float],
-    category_feedback: Dict[str, List[str]],
-    issues: List[Dict[str, Any]],
+    normalized: Dict[str, Any],
     metrics: Dict[str, Any],
 ) -> Dict[str, Any]:
-    ordered_issues = sorted(issues, key=lambda item: item.get("severity", 0.0), reverse=True)
-    top_issues = ordered_issues[:5]
-    strengths: List[Dict[str, Any]] = []
-    for cat, score in subscores.items():
-        if score >= 85:
-            strengths.append(
-                {
-                    "category": cat,
-                    "score": round(score, 2),
-                    "signal": (category_feedback.get(cat) or ["strong performance"])[0],
-                }
-            )
+    top_issues = list(normalized["issues"])[:5]
 
     return {
-        "version": "v1",
+        "version": "v2-llm-grader",
         "task": "generate_learner_feedback_suggestions",
         "language": language,
         "prompt": prompt,
         "learner_transcript": transcript,
-        "overall_score": round(overall_score, 2),
-        "subscores": {k: round(v, 2) for k, v in subscores.items()},
+        "overall_score": normalized["overall_score"],
+        "subscores": normalized["subscores"],
         "metrics": metrics,
         "top_issues": top_issues,
-        "strengths": strengths[:3],
+        "strengths": list(normalized["strengths"])[:3],
         "generator_guidance": {
             "tone": "encouraging and specific",
             "max_suggestions": 3,
@@ -514,7 +311,7 @@ def _build_suggestion_generator_input(
             "prioritize_categories": ["fluency", "grammar", "vocabulary", "coherence", "clarity_proxy"],
         },
         "suggestion_candidates": [
-            {"focus_issue_id": issue["id"], "hint": issue["suggestion_hint"]}
+            {"focus_issue_id": issue["id"], "hint": issue.get("suggestion_hint", "")}
             for issue in top_issues
         ],
     }
@@ -528,136 +325,110 @@ def evaluate_pronunciation(
     weights: Dict[str, float] | None = None,
 ) -> Dict[str, Any]:
     """
-    Deterministic, explainable scoring for hackathon prototyping.
+    LLM-driven grading.
 
-    Expected input_payload:
-    {
-      "transcript": "text user said",
-      "pauses": [{"start": 1.2, "end": 1.7}, ...]  # or equivalent dict/list format
-      "total_duration": 12.4,
-      "language": "en"  # optional, can also be passed as function argument
-    }
+    input_payload expected keys:
+    - transcript: str
+    - pauses: list/dict of pause spans
+    - total_duration: float (seconds)
+    - language: optional BCP-47-ish code (e.g. en, ja, ms, ta)
     """
     weights = weights or DEFAULT_WEIGHTS
-    resolved_language = (language or input_payload.get("language") or "en").lower()
-    profile = _get_language_profile(resolved_language)
-    token_mode = profile["token_mode"]
-    wpm_target_min = float(profile["wpm_target_min"])
-    wpm_target_max = float(profile["wpm_target_max"])
-    filler_words = profile["filler_words"]
-    linking_words = profile["linking_words"]
 
     transcript = str(input_payload.get("transcript", "")).strip()
     total_duration = float(input_payload.get("total_duration", 0.0) or 0.0)
     pause_spans = _extract_pause_spans(input_payload.get("pauses", []))
 
-    tokens = _tokenize(transcript, token_mode=token_mode)
-    num_words = len(tokens)
+    resolved_language = (language or input_payload.get("language") or "en").lower()
+    metrics = _metrics_from_payload(transcript, pause_spans, total_duration)
 
-    total_pause_seconds = sum(end - start for start, end in pause_spans)
-    total_pause_seconds = min(total_pause_seconds, max(total_duration, 0.0))
-    duration_minutes = max(total_duration / 60.0, 1e-9)
-
-    wpm = num_words / duration_minutes if total_duration > 0 else 0.0
-    pause_ratio = total_pause_seconds / total_duration if total_duration > 0 else 0.0
-
-    filler_count = 0
-    lowered_transcript = transcript.lower()
-    for filler in filler_words:
-        if " " in filler:
-            filler_count += lowered_transcript.count(filler)
-        else:
-            filler_count += tokens.count(filler)
-    filler_ratio = filler_count / max(num_words, 1)
-
-    prompt_tokens = _tokenize(prompt or "", token_mode=token_mode) if prompt else []
-
-    fluency_score, fluency_reasons, fluency_issues = _score_fluency(
-        wpm, pause_ratio, filler_ratio, wpm_target_min, wpm_target_max
-    )
-    grammar_score, grammar_reasons, grammar_issues = _score_grammar(transcript, tokens)
-    vocabulary_score, vocabulary_reasons, vocab_metrics, vocab_issues = _score_vocabulary(tokens)
-    coherence_score, coherence_reasons, coherence_issues = _score_coherence(
-        transcript,
-        tokens,
-        linking_words=linking_words,
+    llm_prompt = _build_llm_prompt(
+        transcript=transcript,
         prompt=prompt,
-        prompt_tokens=prompt_tokens,
+        language=resolved_language,
+        metrics=metrics,
+        weights=weights,
     )
-    clarity_score, clarity_reasons, clarity_issues = _score_clarity_proxy(filler_ratio, pause_ratio)
 
-    weighted = {
-        "fluency": fluency_score * weights["fluency"],
-        "grammar": grammar_score * weights["grammar"],
-        "vocabulary": vocabulary_score * weights["vocabulary"],
-        "coherence": coherence_score * weights["coherence"],
-        "clarity_proxy": clarity_score * weights["clarity_proxy"],
-    }
-    overall_score = _clamp(sum(weighted.values()))
+    llm_error = None
+    model_name = os.getenv("SCORING_MODEL", "gemma3:4b")
+    endpoint_env = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434/api/generate").strip()
+    endpoint_for_meta = endpoint_env.rstrip("/")
+    if "/api/" not in endpoint_for_meta:
+        endpoint_for_meta = endpoint_for_meta + "/api/generate"
+    timeout_for_meta = float(os.getenv("SCORING_TIMEOUT_SECONDS", "90"))
 
-    category_feedback = {
-        "fluency": fluency_reasons,
-        "grammar": grammar_reasons,
-        "vocabulary": vocabulary_reasons,
-        "coherence": coherence_reasons,
-        "clarity_proxy": clarity_reasons,
-    }
-
-    summary_feedback = []
-    for category, reasons in category_feedback.items():
-        if reasons:
-            summary_feedback.append(f"{category}: {reasons[0]}")
-
-    all_issues = fluency_issues + grammar_issues + vocab_issues + coherence_issues + clarity_issues
-    prioritized_issues = sorted(all_issues, key=lambda item: item.get("severity", 0.0), reverse=True)
-
-    subscores = {
-        "fluency": round(fluency_score, 2),
-        "grammar": round(grammar_score, 2),
-        "vocabulary": round(vocabulary_score, 2),
-        "coherence": round(coherence_score, 2),
-        "clarity_proxy": round(clarity_score, 2),
-    }
-    metrics = {
-        "num_words": num_words,
-        "total_duration_seconds": round(total_duration, 3),
-        "wpm": round(wpm, 2),
-        "wpm_target_min": wpm_target_min,
-        "wpm_target_max": wpm_target_max,
-        "pause_count": len(pause_spans),
-        "total_pause_seconds": round(total_pause_seconds, 3),
-        "pause_ratio": round(pause_ratio, 4),
-        "filler_count": filler_count,
-        "filler_ratio": round(filler_ratio, 4),
-        **vocab_metrics,
-    }
+    try:
+        llm_raw = _call_ollama_json(llm_prompt)
+        normalized = _normalize_llm_output(llm_raw, weights)
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, socket.timeout, ValueError, json.JSONDecodeError) as exc:
+        if isinstance(exc, urllib.error.HTTPError):
+            try:
+                err_body = exc.read().decode("utf-8")
+                llm_error = f"HTTP {exc.code}: {err_body}"
+            except Exception:
+                llm_error = f"HTTP {exc.code}: {exc.reason}"
+        else:
+            llm_error = str(exc)
+        normalized = {
+            "overall_score": 0.0,
+            "subscores": {
+                "fluency": 0.0,
+                "grammar": 0.0,
+                "vocabulary": 0.0,
+                "coherence": 0.0,
+                "clarity_proxy": 0.0,
+            },
+            "weighted_breakdown": {k: 0.0 for k in weights},
+            "category_feedback": {
+                "fluency": ["LLM grader unavailable."],
+                "grammar": ["LLM grader unavailable."],
+                "vocabulary": ["LLM grader unavailable."],
+                "coherence": ["LLM grader unavailable."],
+                "clarity_proxy": ["LLM grader unavailable."],
+            },
+            "issues": [
+                {
+                    "id": "llm_unavailable",
+                    "category": "coherence",
+                    "severity": 1.0,
+                    "message": "LLM grading service is unavailable.",
+                    "evidence": {"error": llm_error},
+                    "suggestion_hint": "Start the local model service and retry grading.",
+                }
+            ],
+            "strengths": [],
+            "feedback_summary": ["Unable to generate LLM feedback because grading service is unavailable."],
+        }
 
     return {
-        "overall_score": round(overall_score, 2),
+        "overall_score": normalized["overall_score"],
         "language": resolved_language,
-        "subscores": subscores,
+        "subscores": normalized["subscores"],
         "weights": weights,
-        "weighted_breakdown": {k: round(v, 2) for k, v in weighted.items()},
+        "weighted_breakdown": normalized["weighted_breakdown"],
         "metrics": metrics,
-        "category_feedback": category_feedback,
-        "feedback_summary": summary_feedback,
-        "issues": prioritized_issues,
+        "category_feedback": normalized["category_feedback"],
+        "feedback_summary": normalized["feedback_summary"],
+        "issues": normalized["issues"],
+        "strengths": normalized["strengths"],
+        "llm_grading": {
+            "provider": "ollama",
+            "model": model_name,
+            "endpoint": endpoint_for_meta,
+            "timeout_seconds": timeout_for_meta,
+            "success": llm_error is None,
+            "error": llm_error,
+        },
         "suggestion_generator_input": _build_suggestion_generator_input(
             language=resolved_language,
             prompt=prompt,
             transcript=transcript,
-            overall_score=overall_score,
-            subscores=subscores,
-            category_feedback=category_feedback,
-            issues=prioritized_issues,
+            normalized=normalized,
             metrics=metrics,
         ),
     }
 
 
 def evaluate_pronunciation_llm(transcribe_output: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Compatibility wrapper.
-    Keep this function name so callers don't break while using deterministic scoring.
-    """
     return evaluate_pronunciation(transcribe_output)
