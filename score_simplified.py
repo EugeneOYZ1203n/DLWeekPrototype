@@ -3,9 +3,6 @@ from typing import Dict, Any, List
 import re
 from ollama import chat
 
-from commons import clean_json_string
-
-
 system_prompt = """
 You are an expert Japanese language-proficiency scorer.
 
@@ -19,25 +16,19 @@ SECTION: SCORES
 fluency: <0-100>
 grammar: <0-100>
 vocabulary: <0-100>
-relavence: <0-100>
+relevance: <0-100>
 
 SECTION: CATEGORY_FEEDBACK
-fluency: <short reason, MUST BE RELATED TO FLUENCY LIKE PAUSES, FILLER WORDS>
-grammar: <short reason, MUST BE RELATED TO GRAMMAR LIKE PARTICLE USE and SENTENCE STRUCTURE AND TENSES>
-vocabulary: <short reason, MUST BE RELATED TO VOCABULARY LIKE WORD CHOICE AND VARIETY>
-relevance: <short reason, MUST BE RELATED TO HOW THE ANSWER IS RELEVANT TO THE QUESTION>
+fluency: <short explanation about pauses, fillers, smoothness>
+grammar: <short explanation about particles, tense, sentence structure>
+vocabulary: <short explanation about word choice and variety>
+relevance: <short explanation about how well the answer addresses the question, how structured and developed it is>
 
-For each detected issue (Up to 3 top issues), output:
-
-SECTION: ISSUE
-id: <string_id>
-category: fluency|grammar|vocabulary|coherence|clarity_proxy
-severity: <0-1>
-message: <short description>
-evidence: <metrics or transcript snippet>
-suggestion_hint: <short actionable tip>
-
-At the end output:
+SECTION: CATEGORY_IMPROVEMENT
+fluency: <actionable suggestion or "No feedback">
+grammar: <actionable suggestion or "No feedback">
+vocabulary: <actionable suggestion or "No feedback">
+relevance: <actionable suggestion encouraging expansion, clearer structure, stronger development or "No feedback">
 
 SECTION: SUMMARY
 - <point 1>
@@ -47,10 +38,12 @@ Rules:
 - Always follow the exact section labels.
 - Keep sections separated.
 - Be concise.
-- Use transcript and metrics to justify issues.
+- Use transcript and metrics to justify feedback.
+- CATEGORY_IMPROVEMENT must contain suggestions only.
+- If no meaningful improvement is needed, output exactly: No feedback
+- For relevance, comment on structure and development and encourage expanding ideas.
+- Everything must be in ENGLISH
 """
-
-from ollama import chat
 
 def evaluate_streaming(input_payload: Dict[str, Any], question, stats, on_chunk=None):
     transcript = input_payload.get("transcript", "")
@@ -80,15 +73,10 @@ ESTIMATED METRICS:
     for chunk in response:
         piece = chunk["message"]["content"]
         full_text += piece
-
         if on_chunk:
             on_chunk(piece)
 
     return full_text
-
-
-from typing import Dict, Any, List
-import re
 
 
 def calculate_extra_stats(input_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -96,7 +84,7 @@ def calculate_extra_stats(input_payload: Dict[str, Any]) -> Dict[str, Any]:
     segments: List[Dict[str, Any]] = input_payload.get("segments", []) or []
 
     # -----------------------------
-    # 1. Duration Calculation
+    # Duration Calculation
     # -----------------------------
     if segments:
         start_time = float(segments[0].get("start", 0.0))
@@ -106,76 +94,49 @@ def calculate_extra_stats(input_payload: Dict[str, Any]) -> Dict[str, Any]:
         total_speaking_time = 0.0
 
     # -----------------------------
-    # 2. Pause Detection (from gaps)
+    # Pause Detection
     # -----------------------------
     pause_durations = []
-
     for i in range(1, len(segments)):
         prev_end = float(segments[i - 1].get("end", 0.0))
         curr_start = float(segments[i].get("start", 0.0))
         gap = curr_start - prev_end
-
-        # Ignore micro-gaps under 200ms
         if gap > 0.2:
             pause_durations.append(gap)
 
     pause_count = len(pause_durations)
     total_pause_time = sum(pause_durations)
-    avg_pause_duration = (
-        total_pause_time / pause_count if pause_count > 0 else 0.0
-    )
-
+    avg_pause_duration = total_pause_time / pause_count if pause_count else 0.0
     long_pause_count = sum(1 for p in pause_durations if p >= 1.5)
 
     # -----------------------------
-    # 3. Japanese Filler Detection
+    # Filler Detection
     # -----------------------------
-    filler_words = [
-        "えー", "ええ", "えっと", "ええと",
-        "あの", "その", "まあ", "なんか",
-        "うーん", "えーと"
-    ]
-
+    filler_words = ["えー", "ええ", "えっと", "ええと", "あの", "その", "まあ", "なんか", "うーん", "えーと"]
     filler_pattern = r"|".join(map(re.escape, filler_words))
     filler_matches = re.findall(filler_pattern, transcript)
     filler_count = len(filler_matches)
-
-    filler_per_minute = (
-        (filler_count / total_speaking_time) * 60
-        if total_speaking_time > 0
-        else 0.0
-    )
+    filler_per_minute = (filler_count / total_speaking_time * 60) if total_speaking_time else 0.0
 
     # -----------------------------
-    # 4. Speech Pace (Japanese heuristic)
+    # Speech Pace
     # -----------------------------
-    # Count Japanese characters (Hiragana, Katakana, Kanji)
     jp_chars = re.findall(r"[\u3040-\u30ff\u3400-\u9fff]", transcript)
     char_count = len(jp_chars)
-
-    chars_per_minute = (
-        (char_count / total_speaking_time) * 60
-        if total_speaking_time > 0
-        else 0.0
-    )
+    chars_per_minute = (char_count / total_speaking_time * 60) if total_speaking_time else 0.0
 
     # -----------------------------
-    # 5. Segment Duration Stats
+    # Segment Duration
     # -----------------------------
     segment_durations = [
         float(seg["end"]) - float(seg["start"])
         for seg in segments
         if "start" in seg and "end" in seg
     ]
-
-    avg_segment_duration = (
-        sum(segment_durations) / len(segment_durations)
-        if segment_durations
-        else 0.0
-    )
+    avg_segment_duration = sum(segment_durations) / len(segment_durations) if segment_durations else 0.0
 
     # -----------------------------
-    # 6. Return Metrics
+    # Return Metrics
     # -----------------------------
     return {
         "speech_stats": {

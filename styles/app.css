@@ -180,3 +180,13 @@
   -webkit-text-fill-color: var(--text);
   opacity: 1;
 }
+
+div[data-testid="stSpinner"] svg circle {
+    stroke: var(--text) !important;
+    stroke-width: 4px !important;
+}
+
+div[data-testid="stSpinner"] p {
+    color: var(--text) !important;
+    font-weight: 600;
+}
