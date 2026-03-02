@@ -175,6 +175,7 @@ if st.button("Record", use_container_width=True):
     transcript_text = transcribe_result.get("transcript", "")
 
     st.markdown("### 🗒 Transcript")
+    st.text_area(
         "Transcript",
         value=transcript_text,
         height=140,
@@ -190,6 +191,7 @@ if st.button("Record", use_container_width=True):
         audio_bytes,
         format="audio/wav"
     )
+
     st.download_button(
         label="⬇️ Download Recording",
         data=audio_bytes,
