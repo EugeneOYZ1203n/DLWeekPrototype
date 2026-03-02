@@ -31,6 +31,12 @@ if "selected_prompt_key" not in st.session_state:
 if "custom_prompt_text" not in st.session_state:
     st.session_state.custom_prompt_text = ""
 
+if "is_generating_question" not in st.session_state:
+    st.session_state.is_generating_question = False
+
+if "pending_question_request" not in st.session_state:
+    st.session_state.pending_question_request = None
+
 if "practice_question" not in st.session_state:
     st.session_state.practice_question = get_question(
         prompt_key=st.session_state.get("selected_prompt_key", "beginner"),
@@ -231,12 +237,31 @@ if selected_prompt_key == "custom":
         placeholder="Provide some topics to generate a prompt!",
     )
 
-if st.button("Generate Question"):
-    st.session_state.practice_question = get_question(
-        prompt_key=selected_prompt_key,
-        custom_prompt=(custom_prompt.strip() if custom_prompt else None),
-        target_language=st.session_state.get("selected_language", "ja"),
-    )
+generate_wrap_col, _ = st.columns([1, 3])
+with generate_wrap_col:
+    generate_col, generate_status_col = st.columns([5, 1])
+    with generate_col:
+        if st.button("Generate Question", use_container_width=True):
+            st.session_state.pending_question_request = {
+                "prompt_key": selected_prompt_key,
+                "custom_prompt": (custom_prompt.strip() if custom_prompt else None),
+                "target_language": st.session_state.get("selected_language", "ja"),
+            }
+            st.session_state.is_generating_question = True
+            st.rerun()
+
+if st.session_state.is_generating_question and st.session_state.pending_question_request:
+    request = st.session_state.pending_question_request
+    with generate_status_col:
+        with st.container(key="generate_spinner_slot"):
+            with st.spinner(""):
+                st.session_state.practice_question = get_question(
+                    prompt_key=request["prompt_key"],
+                    custom_prompt=request["custom_prompt"],
+                    target_language=request["target_language"],
+                )
+    st.session_state.pending_question_request = None
+    st.session_state.is_generating_question = False
     st.rerun()
 
 timer_placeholder = st.empty()

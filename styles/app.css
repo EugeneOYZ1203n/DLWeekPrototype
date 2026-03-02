@@ -235,3 +235,20 @@ section.main [data-testid="stTextArea"] textarea:focus {
   -webkit-text-fill-color: var(--text);
   opacity: 1;
 }
+
+.st-key-generate_spinner_slot [data-testid="stSpinner"] {
+  min-height: 2.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.st-key-generate_spinner_slot [data-testid="stSpinner"] svg {
+  width: 2rem;
+  height: 2rem;
+}
+
+.st-key-generate_spinner_slot [data-testid="stSpinner"] > div {
+  width: 2rem;
+  height: 2rem;
+}

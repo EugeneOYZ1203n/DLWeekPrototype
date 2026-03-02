@@ -46,7 +46,7 @@ SAMPLE_PROMPTS: Dict[str, str] = {
         "Create one conversation-opening sentence for a business meeting context with a language learner. "
         "Use a polite register and make it suitable for a realistic spoken exchange."
     ),
-    "daily_life": (
+    "daily life": (
         "Create one conversation-opening sentence about daily life (routine, hobbies, or weekend plans). "
         "Make it friendly and easy for a language learner to answer naturally."
     ),
