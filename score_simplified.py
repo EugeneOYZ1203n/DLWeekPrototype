@@ -27,7 +27,7 @@ grammar: <short reason, MUST BE RELATED TO GRAMMAR LIKE PARTICLE USE and SENTENC
 vocabulary: <short reason, MUST BE RELATED TO VOCABULARY LIKE WORD CHOICE AND VARIETY>
 relevance: <short reason, MUST BE RELATED TO HOW THE ANSWER IS RELEVANT TO THE QUESTION>
 
-For each detected issue, output:
+For each detected issue (Up to 3 top issues), output:
 
 SECTION: ISSUE
 id: <string_id>

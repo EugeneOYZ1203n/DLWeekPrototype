@@ -7,12 +7,11 @@ import time
 from html import escape
 
 import numpy as np
-import pandas as pd
 import sounddevice as sd
 import soundfile as sf
 import streamlit as st
 
-from question import SAMPLE_PROMPTS, get_last_ollama_debug, get_question
+from question import SAMPLE_PROMPTS, get_question
 from score_simplified import calculate_extra_stats, evaluate_streaming
 from transcribe import transcribe_audio
 from styling import (
@@ -22,6 +21,10 @@ from styling import (
     load_css,
     apply_theme
 )
+
+# -------------------------
+# Constants
+# -------------------------
 
 SAMPLE_RATE = 16000
 MAX_DURATION = 60
@@ -52,11 +55,15 @@ def record_audio(timer_placeholder):
     def callback(indata, frames_count, time_info, status):
         nonlocal last_sound_time
         frames.append(indata.copy())
-        rms = np.sqrt(np.mean(indata**2))
+        rms = np.sqrt(np.mean(indata ** 2))
         if rms > SILENCE_THRESHOLD:
             last_sound_time = time.time()
 
-    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, callback=callback):
+    with sd.InputStream(
+        samplerate=SAMPLE_RATE,
+        channels=1,
+        callback=callback
+    ):
         while True:
             elapsed = time.time() - start_time
             timer_placeholder.markdown(
@@ -65,7 +72,10 @@ def record_audio(timer_placeholder):
             )
             time.sleep(0.2)
 
-            if (time.time() - last_sound_time > SILENCE_LIMIT) or elapsed > MAX_DURATION:
+            if (
+                time.time() - last_sound_time > SILENCE_LIMIT
+                or elapsed > MAX_DURATION
+            ):
                 break
 
     audio_array = np.concatenate(frames, axis=0)
@@ -73,7 +83,7 @@ def record_audio(timer_placeholder):
 
 
 # -------------------------
-# Main App
+# UI Setup
 # -------------------------
 
 configure_page()
@@ -82,7 +92,10 @@ init_state()
 load_css()
 apply_theme()
 
+# -------------------------
 # Sidebar
+# -------------------------
+
 with st.sidebar:
     st.header("Session")
     theme_label = (
@@ -92,7 +105,10 @@ with st.sidebar:
     )
     st.button(theme_label, use_container_width=True, on_click=toggle_theme)
 
-# Prompt selection
+# -------------------------
+# Prompt Selection
+# -------------------------
+
 prompt_options = list(SAMPLE_PROMPTS.keys()) + ["custom"]
 selected_prompt_key = st.selectbox("Prompt style", prompt_options)
 
@@ -108,7 +124,12 @@ if st.button("Generate Question"):
 
 question = st.session_state.practice_question
 
+# -------------------------
+# Header
+# -------------------------
+
 st.markdown('<p class="title">Japanese Speaking Practice</p>', unsafe_allow_html=True)
+
 st.markdown(
     f"""
     <div class="sentence">
@@ -119,12 +140,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Recording
+# -------------------------
+# Recording Button
+# -------------------------
+
 if st.button("Record", use_container_width=True):
 
-    # ----------------------------
-    # RECORDING
-    # ----------------------------
     timer_placeholder = st.empty()
     status_placeholder = st.empty()
 
@@ -134,88 +155,185 @@ if st.button("Record", use_container_width=True):
 
     status_placeholder.info("⏹ Recording complete. Preparing audio...")
 
-    # ----------------------------
-    # SAVE TEMP AUDIO
-    # ----------------------------
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
-        sf.write(tmpfile.name, audio_array, SAMPLE_RATE)
-        temp_path = tmpfile.name
+    # -------------------------
+    # Save Temp Audio
+    # -------------------------
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+        sf.write(tmp.name, audio_array, SAMPLE_RATE)
+        temp_path = tmp.name
 
     with open(temp_path, "rb") as f:
         audio_bytes = f.read()
 
-    # ----------------------------
-    # TRANSCRIPTION
-    # ----------------------------
-    status_placeholder.info("📝 Transcribing audio...")
+    # -------------------------
+    # Transcription
+    # -------------------------
 
-    with st.spinner("..."):
+    status_placeholder.info("📝 Transcribing audio...")
+    with st.spinner("Transcribing..."):
         transcribe_result = transcribe_audio(temp_path)
         print(transcribe_result)
 
-    # ----------------------------
-    # SCORING
-    # ----------------------------
-    status_placeholder.info("📊 Calculating metrics...")
-    
-    with st.spinner("..."):
+    # -------------------------
+    # Metrics
+    # -------------------------
+
+    status_placeholder.info("📊 Analyzing speech metrics...")
+    with st.spinner("Analyzing..."):
         stats = calculate_extra_stats(transcribe_result)
-        print(stats)
 
-    status_placeholder.info("📊 Generating report...")
+    st.markdown("### 📊 Speech Metrics")
 
-    status_box = st.empty()
+    speech = stats["speech_stats"]
+    pauses = stats["pause_stats"]
+    fillers = stats["filler_stats"]
 
-    streamed_text = ""
+    st.markdown(
+        f"""
+        <div class="result-card sentence-text">
+        <b>Speaking Time:</b> {speech['total_speaking_seconds']}s<br/>
+        <b>Chars / Minute:</b> {speech['chars_per_minute_estimate']}<br/>
+        <b>Avg Segment:</b> {speech['avg_segment_duration']}s<br/>
+        <b>Pause Count:</b> {pauses['pause_count']}<br/>
+        <b>Long Pauses (&gt;1.5s):</b> {pauses['long_pause_count_1_5s']}<br/>
+        <b>Avg Pause:</b> {pauses['avg_pause_seconds']}s<br/>
+        <b>Filler Count:</b> {fillers['filler_count']}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    def update_ui(piece):
-        global streamed_text
-        streamed_text += piece
-        status_box.markdown(f"```\n{streamed_text}\n```")
+    if fillers["detected_fillers"]:
+        st.markdown(
+            f"""
+            <div class="result-card sentence-text">
+            <b>Detected Fillers:</b> {", ".join(fillers["detected_fillers"])}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    full_output = evaluate_streaming(
+    # -------------------------
+    # LLM Streaming Evaluation
+    # -------------------------
+
+    st.markdown("## 🤖 AI Evaluation")
+
+    scores_box = st.empty()
+    feedback_box = st.empty()
+    issues_box = st.empty()
+    summary_box = st.empty()
+
+    streamed = {"text": ""}
+    parsed = {
+        "scores": {},
+        "category_feedback": {},
+        "issues": [],
+        "summary": [],
+    }
+
+    def parse_stream(buffer: str):
+        sections = re.split(r"\nSECTION: ", buffer)
+
+        for sec in sections:
+            sec = sec.strip()
+            if not sec:
+                continue
+
+            if sec.startswith("SCORES"):
+                for line in sec.splitlines()[1:]:
+                    if ":" in line:
+                        k, v = line.split(":", 1)
+                        if v.strip().isdigit():
+                            parsed["scores"][k.strip()] = int(v.strip())
+
+            elif sec.startswith("CATEGORY_FEEDBACK"):
+                for line in sec.splitlines()[1:]:
+                    if ":" in line:
+                        k, v = line.split(":", 1)
+                        parsed["category_feedback"][k.strip()] = v.strip()
+
+            elif sec.startswith("ISSUE"):
+                issue = {}
+                for line in sec.splitlines()[1:]:
+                    if ":" in line:
+                        k, v = line.split(":", 1)
+                        issue[k.strip()] = v.strip()
+                if issue and issue not in parsed["issues"]:
+                    parsed["issues"].append(issue)
+
+            elif sec.startswith("SUMMARY"):
+                parsed["summary"] = [
+                    l.strip("- ").strip()
+                    for l in sec.splitlines()[1:]
+                    if l.strip()
+                ]
+
+    def render():
+        if parsed["scores"]:
+            scores_box.markdown(
+                f"""
+                <div class="result-card sentence-text">
+                <h3>📈 Scores</h3>
+                {parsed["scores"]}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        if parsed["category_feedback"]:
+            html = "<div class='result-card sentence-text'><h3>🧠 Feedback</h3>"
+            for k, v in parsed["category_feedback"].items():
+                html += f"<b>{k.capitalize()}</b>: {v}<br/>"
+            html += "</div>"
+            feedback_box.markdown(html, unsafe_allow_html=True)
+
+        if parsed["issues"]:
+            html = "<div class='result-card sentence-text'><h3>⚠ Issues</h3>"
+            for i in parsed["issues"]:
+                html += f"""
+                <b>{i.get('id')}</b><br/>
+                Category: {i.get('category')}<br/>
+                Severity: {i.get('severity')}<br/>
+                {i.get('message')}<br/>
+                <i>{i.get('suggestion_hint')}</i><br/><br/>
+                """
+            html += "</div>"
+            issues_box.markdown(html, unsafe_allow_html=True)
+
+        if parsed["summary"]:
+            html = "<div class='result-card sentence-text'><h3>📝 Summary</h3><ul>"
+            for s in parsed["summary"]:
+                html += f"<li>{s}</li>"
+            html += "</ul></div>"
+            summary_box.markdown(html, unsafe_allow_html=True)
+
+    def update_ui(chunk):
+        print(chunk)
+        streamed["text"] += chunk
+        parse_stream(streamed["text"])
+        render()
+
+    evaluate_streaming(
         transcribe_result,
         question,
         stats,
-        on_chunk=update_ui
+        on_chunk=update_ui,
     )
 
-    # ----------------------------
-    # CLEANUP
-    # ----------------------------
+    # -------------------------
+    # Cleanup
+    # -------------------------
+
     os.remove(temp_path)
     timer_placeholder.empty()
-
     status_placeholder.success("✅ Processing complete!")
 
-    # ----------------------------
-    # SAVE TO HISTORY
-    # ----------------------------
     st.session_state.history.append({
         "audio_bytes": audio_bytes,
         "elapsed_time": elapsed_time,
         "transcript": transcribe_result.get("transcript", ""),
-        "avg_confidence": transcribe_result.get("avg_confidence", 0.0),
+        "stats": stats,
+        "evaluation": parsed,
     })
-
-    # Optional: auto-clear progress after short delay
-    time.sleep(1)
-
-# History display
-for idx, item in enumerate(st.session_state.history, start=1):
-    st.markdown(f"### Attempt {idx}")
-    st.audio(item["audio_bytes"])
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write(f'Duration: {item["elapsed_time"]:.2f}s')
-    with col2:
-        st.write(f'Confidence: {item["avg_confidence"]:.2f}')
-
-    st.text_area(
-        f"Transcript {idx}",
-        value=item["transcript"] or "No speech detected.",
-        height=120,
-        disabled=True,
-        key=f"transcript_{idx}",
-    )
