@@ -237,6 +237,7 @@ if st.button("Generate Question"):
         custom_prompt=(custom_prompt.strip() if custom_prompt else None),
         target_language=st.session_state.get("selected_language", "ja"),
     )
+    st.rerun()
 
 timer_placeholder = st.empty()
 

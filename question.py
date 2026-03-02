@@ -46,6 +46,34 @@ SAMPLE_PROMPTS: Dict[str, str] = {
         "Create one conversation-opening sentence for a business meeting context with a language learner. "
         "Use a polite register and make it suitable for a realistic spoken exchange."
     ),
+    "daily_life": (
+        "Create one conversation-opening sentence about daily life (routine, hobbies, or weekend plans). "
+        "Make it friendly and easy for a language learner to answer naturally."
+    ),
+    "food": (
+        "Create one conversation-opening sentence about food, restaurants, or cooking. "
+        "Make it practical for speaking practice and invite a short response."
+    ),
+    "shopping": (
+        "Create one conversation-opening sentence for shopping situations (price, size, color, or preference). "
+        "Keep it natural and useful for a learner in a real interaction."
+    ),
+    "health": (
+        "Create one conversation-opening sentence for a basic health or pharmacy situation. "
+        "Keep it polite, clear, and appropriate for beginner-friendly speaking practice."
+    ),
+    "school": (
+        "Create one conversation-opening sentence for school or study life. "
+        "Make it suitable for a learner discussing classes, homework, or teachers."
+    ),
+    "social": (
+        "Create one conversation-opening sentence for meeting someone new or making small talk. "
+        "Keep it warm, natural, and easy to respond to."
+    ),
+    "emergency": (
+        "Create one conversation-opening sentence for an urgent help situation (asking for assistance or directions). "
+        "Keep it concise, clear, and practical for spoken communication."
+    ),
 }
 
 
