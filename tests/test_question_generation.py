@@ -52,7 +52,9 @@ class TestQuestionGeneration(unittest.TestCase):
         _ = question.get_question(prompt_key="beginner", custom_prompt=custom_prompt)
 
         _, kwargs = mock_post.call_args
-        self.assertEqual(kwargs["json"]["prompt"], custom_prompt)
+        sent_prompt = kwargs["json"]["prompt"]
+        self.assertIn(custom_prompt, sent_prompt)
+        self.assertIn("language code: ja", sent_prompt)
 
     @patch("question.requests.post")
     def test_get_question_uses_beginner_prompt_for_unknown_key(self, mock_post):
@@ -61,7 +63,34 @@ class TestQuestionGeneration(unittest.TestCase):
         _ = question.get_question(prompt_key="unknown-key")
 
         _, kwargs = mock_post.call_args
-        self.assertEqual(kwargs["json"]["prompt"], question.SAMPLE_PROMPTS["beginner"])
+        sent_prompt = kwargs["json"]["prompt"]
+        self.assertIn(question.SAMPLE_PROMPTS["beginner"], sent_prompt)
+        self.assertIn("language code: ja", sent_prompt)
+
+    @patch("question.requests.post")
+    def test_get_question_uses_requested_target_language(self, mock_post):
+        mock_post.return_value = FakeResponse({"response": "This is a test."})
+
+        _ = question.get_question(prompt_key="beginner", target_language="en")
+
+        _, kwargs = mock_post.call_args
+        self.assertIn("language code: en", kwargs["json"]["prompt"])
+
+    @patch("question.requests.post")
+    def test_generate_question_strips_language_prefix_label(self, mock_post):
+        mock_post.return_value = FakeResponse({"response": "Japanese: 今日はいい天気ですね。"})
+
+        result = question.generate_question_with_ollama("any prompt", target_language="ja")
+
+        self.assertEqual(result, "今日はいい天気ですね。")
+
+    @patch("question.requests.post")
+    def test_generate_question_uses_language_fallback_on_error(self, mock_post):
+        mock_post.side_effect = requests.RequestException("connection error")
+
+        result = question.generate_question_with_ollama("any prompt", target_language="en")
+
+        self.assertEqual(result, question.FALLBACK_QUESTIONS["en"])
 
 
 if __name__ == "__main__":
