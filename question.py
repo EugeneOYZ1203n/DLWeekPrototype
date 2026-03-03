@@ -35,44 +35,63 @@ LANGUAGE_NAMES: Dict[str, str] = {
 
 SAMPLE_PROMPTS: Dict[str, str] = {
     "beginner": (
-        "Create one short and natural conversation opener for a beginner language learner. "
-        "Make it easy to respond to in everyday conversation. Keep it simple and practical."
-    ),
-    "travel": (
-        "Create one conversation-opening sentence for travel situations between a local and a learner. "
-        "Make it polite, practical, and easy for the learner to answer."
-    ),
-    "business": (
-        "Create one conversation-opening sentence for a business meeting context with a language learner. "
-        "Use a polite register and make it suitable for a realistic spoken exchange."
+        "Create one simple discussion question for a beginner language learner. "
+        "It should be easy to answer in 2–3 sentences using common vocabulary. "
+        "Focus on everyday topics like hobbies, family, or routines."
     ),
     "daily life": (
-        "Create one conversation-opening sentence about daily life (routine, hobbies, or weekend plans). "
-        "Make it friendly and easy for a language learner to answer naturally."
+        "Create one natural discussion question about daily life. "
+        "It should encourage the learner to describe their routine, family, hobbies, "
+        "or recent experiences in 3–5 sentences."
+    ),
+    "travel": (
+        "Create one discussion question about travel experiences. "
+        "Ask about past trips, dream destinations, cultural differences, "
+        "or travel preferences to encourage a descriptive response."
     ),
     "food": (
-        "Create one conversation-opening sentence about food, restaurants, or cooking. "
-        "Make it practical for speaking practice and invite a short response."
+        "Create one discussion question about food or eating habits. "
+        "Ask about favorite dishes, cooking experiences, restaurants, "
+        "or food culture in a way that encourages explanation."
     ),
     "shopping": (
-        "Create one conversation-opening sentence for shopping situations (price, size, color, or preference). "
-        "Keep it natural and useful for a learner in a real interaction."
-    ),
-    "health": (
-        "Create one conversation-opening sentence for a basic health or pharmacy situation. "
-        "Keep it polite, clear, and appropriate for beginner-friendly speaking practice."
+        "Create one discussion question about shopping habits or preferences. "
+        "Ask about online vs in-store shopping, price considerations, "
+        "or memorable shopping experiences."
     ),
     "school": (
-        "Create one conversation-opening sentence for school or study life. "
-        "Make it suitable for a learner discussing classes, homework, or teachers."
+        "Create one discussion question about school or learning experiences. "
+        "Ask about favorite subjects, study habits, teachers, "
+        "or challenges in learning."
+    ),
+    "business": (
+        "Create one discussion question suitable for a professional or business context. "
+        "Encourage the learner to talk about teamwork, leadership, "
+        "workplace challenges, or communication styles."
     ),
     "social": (
-        "Create one conversation-opening sentence for meeting someone new or making small talk. "
-        "Keep it warm, natural, and easy to respond to."
+        "Create one discussion question about friendships or social life. "
+        "Ask about maintaining friendships, meeting new people, "
+        "or meaningful conversations."
     ),
-    "emergency": (
-        "Create one conversation-opening sentence for an urgent help situation (asking for assistance or directions). "
-        "Keep it concise, clear, and practical for spoken communication."
+    "health": (
+        "Create one discussion question about health or lifestyle habits. "
+        "Encourage the learner to talk about exercise, diet, stress management, "
+        "or healthy routines."
+    ),
+    "argumentative": (
+        "Create one thoughtful discussion question that invites opinion and reasoning. "
+        "It should allow the learner to express agreement or disagreement and explain why. "
+        "Examples include topics like teamwork, technology, education, or social media."
+    ),
+    "personal growth": (
+        "Create one reflective discussion question about personal growth or life lessons. "
+        "Ask about an experience that taught an important value such as teamwork, patience, "
+        "failure, responsibility, or perseverance."
+    ),
+    "culture": (
+        "Create one discussion question about cultural differences or traditions. "
+        "Encourage comparison between cultures, customs, or social norms."
     ),
 }
 
